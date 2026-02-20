@@ -74,6 +74,20 @@ jobs:
           cp /tmp/whisper.cpp/build/bin/whisper-cli src-tauri/binaries/whisper-cli-aarch64-apple-darwin
           chmod +x src-tauri/binaries/whisper-cli-aarch64-apple-darwin
 
+      - name: Build system audio capture sidecar (macOS arm64)
+        run: |
+          set -euxo pipefail
+          swiftc -O \
+            -target arm64-apple-macos13.0 \
+            -parse-as-library \
+            -framework AVFoundation \
+            -framework CoreGraphics \
+            -framework CoreMedia \
+            -framework ScreenCaptureKit \
+            src-tauri/native/system_audio_capture.swift \
+            -o src-tauri/binaries/system-audio-capture-aarch64-apple-darwin
+          chmod +x src-tauri/binaries/system-audio-capture-aarch64-apple-darwin
+
       - name: Install npm dependencies
         run: npm install
 
@@ -91,6 +105,7 @@ jobs:
           DMG_PATH="$(ls src-tauri/target/${TARGET}/release/bundle/dmg/*.dmg | head -n1)"
 
           codesign --force --sign - "${APP_PATH}/Contents/MacOS/whisper-cli"
+          codesign --force --sign - "${APP_PATH}/Contents/MacOS/system-audio-capture"
           codesign --force --deep --sign - "${APP_PATH}"
           codesign --verify --deep --strict --verbose=4 "${APP_PATH}"
 

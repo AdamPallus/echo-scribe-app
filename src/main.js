@@ -53,6 +53,9 @@ let isRecording = false;
 let isStoppingRecording = false;
 let isTranscribing = false;
 let isSavingCoachnotesSettings = false;
+let activeCaptureMode = 'microphone';
+let systemCaptureActive = false;
+let microphoneCaptureActive = false;
 let audioChunks = [];
 let totalSamples = 0;
 let sampleRate = 44100;
@@ -122,9 +125,12 @@ function captureModeNeedsSystemAudio(mode) {
 
 function updateCaptureModeHelp() {
   const mode = selectedCaptureMode();
-  if (captureModeNeedsSystemAudio(mode)) {
+  if (mode === 'system') {
     captureModeHelp.textContent =
-      'macOS will ask you to share a screen/window. Enable audio sharing in that prompt.';
+      'Captures all system audio from this Mac (native ScreenCaptureKit).';
+  } else if (mode === 'both') {
+    captureModeHelp.textContent =
+      'Captures system audio and microphone together (native system capture + mic mix).';
   } else {
     captureModeHelp.textContent = 'Records local microphone input from this Mac.';
   }
@@ -464,6 +470,121 @@ function registerTrackEndHandlers(stream, label) {
   }
 }
 
+function decodePcm16Wav(bytes) {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+
+  const readStr = (offset, len) => {
+    let out = '';
+    for (let i = 0; i < len; i++) out += String.fromCharCode(view.getUint8(offset + i));
+    return out;
+  };
+
+  if (data.byteLength < 44 || readStr(0, 4) !== 'RIFF' || readStr(8, 4) !== 'WAVE') {
+    throw new Error('Invalid WAV data.');
+  }
+
+  let offset = 12;
+  let format = null;
+  let channels = 1;
+  let sampleRateHz = 16000;
+  let bitsPerSample = 16;
+  let dataOffset = -1;
+  let dataSize = 0;
+
+  while (offset + 8 <= data.byteLength) {
+    const chunkId = readStr(offset, 4);
+    const chunkSize = view.getUint32(offset + 4, true);
+    const chunkStart = offset + 8;
+
+    if (chunkId === 'fmt ' && chunkSize >= 16 && chunkStart + chunkSize <= data.byteLength) {
+      format = view.getUint16(chunkStart + 0, true);
+      channels = view.getUint16(chunkStart + 2, true);
+      sampleRateHz = view.getUint32(chunkStart + 4, true);
+      bitsPerSample = view.getUint16(chunkStart + 14, true);
+    } else if (chunkId === 'data' && chunkStart + chunkSize <= data.byteLength) {
+      dataOffset = chunkStart;
+      dataSize = chunkSize;
+      break;
+    }
+
+    offset = chunkStart + chunkSize + (chunkSize % 2);
+  }
+
+  if (format !== 1 || bitsPerSample !== 16 || dataOffset < 0 || channels <= 0) {
+    throw new Error('Unsupported WAV format. Expected PCM16.');
+  }
+
+  const frameCount = Math.floor(dataSize / (2 * channels));
+  const samples = new Float32Array(frameCount);
+
+  let cursor = dataOffset;
+  for (let frame = 0; frame < frameCount; frame++) {
+    let mixed = 0;
+    for (let channel = 0; channel < channels; channel++) {
+      const sample = view.getInt16(cursor, true);
+      cursor += 2;
+      mixed += sample / 32768;
+    }
+    samples[frame] = mixed / channels;
+  }
+
+  return {
+    samples,
+    sampleRate: sampleRateHz,
+  };
+}
+
+function resampleBuffer(buffer, inputRate, outputRate) {
+  if (inputRate === outputRate || buffer.length === 0) {
+    return buffer;
+  }
+
+  if (inputRate > outputRate) {
+    return downsampleBuffer(buffer, inputRate, outputRate);
+  }
+
+  const ratio = outputRate / inputRate;
+  const outputLength = Math.max(1, Math.round(buffer.length * ratio));
+  const output = new Float32Array(outputLength);
+
+  for (let i = 0; i < outputLength; i++) {
+    const sourceIndex = i / ratio;
+    const lower = Math.floor(sourceIndex);
+    const upper = Math.min(lower + 1, buffer.length - 1);
+    const frac = sourceIndex - lower;
+    output[i] = buffer[lower] * (1 - frac) + buffer[upper] * frac;
+  }
+
+  return output;
+}
+
+function normalizeWavTo16k(wavBytes) {
+  const decoded = decodePcm16Wav(wavBytes);
+  const normalized = resampleBuffer(decoded.samples, decoded.sampleRate, 16000);
+  return encodeWav(normalized, 16000);
+}
+
+function mergeSystemAndMic(systemWav, micWav) {
+  const systemDecoded = decodePcm16Wav(systemWav);
+  const micDecoded = decodePcm16Wav(micWav);
+  const targetRate = 16000;
+
+  const systemSamples = resampleBuffer(systemDecoded.samples, systemDecoded.sampleRate, targetRate);
+  const micSamples = resampleBuffer(micDecoded.samples, micDecoded.sampleRate, targetRate);
+
+  const mixedLength = Math.max(systemSamples.length, micSamples.length);
+  const mixed = new Float32Array(mixedLength);
+
+  for (let i = 0; i < mixedLength; i++) {
+    const a = i < systemSamples.length ? systemSamples[i] : 0;
+    const b = i < micSamples.length ? micSamples[i] : 0;
+    mixed[i] = Math.max(-1, Math.min(1, (a + b) * 0.5));
+  }
+
+  return encodeWav(mixed, targetRate);
+}
+
 async function requestMicrophoneStream() {
   return navigator.mediaDevices.getUserMedia({
     audio: {
@@ -475,28 +596,6 @@ async function requestMicrophoneStream() {
   });
 }
 
-async function requestSystemAudioStream() {
-  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
-    throw new Error('System audio capture is not supported in this runtime.');
-  }
-
-  const stream = await navigator.mediaDevices.getDisplayMedia({
-    video: true,
-    audio: true,
-  });
-
-  if (stream.getAudioTracks().length === 0) {
-    for (const track of stream.getTracks()) {
-      track.stop();
-    }
-    throw new Error(
-      'No shared audio track was detected. In the sharing prompt, pick a source with audio enabled.'
-    );
-  }
-
-  return stream;
-}
-
 async function startRecording() {
   if (!selectedModelReady()) {
     setStatus('Download the selected model first.', 'error');
@@ -504,53 +603,57 @@ async function startRecording() {
   }
 
   const mode = selectedCaptureMode();
+  const captureSystemAudio = captureModeNeedsSystemAudio(mode);
+  const captureMic = mode !== 'system';
 
   try {
-    const streams = [];
-
-    if (captureModeNeedsSystemAudio(mode)) {
-      setStatus('Choose a screen/window and enable audio sharing...', 'working');
-      const systemStream = await requestSystemAudioStream();
-      registerTrackEndHandlers(systemStream, 'System audio');
-      streams.push(systemStream);
+    if (captureSystemAudio) {
+      await invoke('start_system_audio_recording');
+      systemCaptureActive = true;
+    } else {
+      systemCaptureActive = false;
     }
 
-    if (mode !== 'system') {
+    const streams = [];
+    if (captureMic) {
       const micStream = await requestMicrophoneStream();
       registerTrackEndHandlers(micStream, 'Microphone');
       streams.push(micStream);
     }
-
+    microphoneCaptureActive = captureMic;
     captureStreams = streams;
+    activeCaptureMode = mode;
 
-    audioContext = new AudioContext();
-    sampleRate = audioContext.sampleRate;
-    processorNode = audioContext.createScriptProcessor(4096, 1, 1);
-    silentGain = audioContext.createGain();
-    silentGain.gain.value = 0;
+    if (captureMic) {
+      audioContext = new AudioContext();
+      sampleRate = audioContext.sampleRate;
+      processorNode = audioContext.createScriptProcessor(4096, 1, 1);
+      silentGain = audioContext.createGain();
+      silentGain.gain.value = 0;
 
-    sourceNodes = captureStreams.map((stream) => {
-      const node = audioContext.createMediaStreamSource(stream);
-      node.connect(processorNode);
-      return node;
-    });
+      sourceNodes = captureStreams.map((stream) => {
+        const node = audioContext.createMediaStreamSource(stream);
+        node.connect(processorNode);
+        return node;
+      });
+
+      processorNode.onaudioprocess = (event) => {
+        if (!isRecording) return;
+        const input = extractMonoChannel(event.inputBuffer);
+        const copy = new Float32Array(input.length);
+        copy.set(input);
+        audioChunks.push(copy);
+        totalSamples += copy.length;
+      };
+
+      processorNode.connect(silentGain);
+      silentGain.connect(audioContext.destination);
+    }
 
     audioChunks = [];
     totalSamples = 0;
     recordedWav = null;
     savedTranscriptPath = null;
-
-    processorNode.onaudioprocess = (event) => {
-      if (!isRecording) return;
-      const input = extractMonoChannel(event.inputBuffer);
-      const copy = new Float32Array(input.length);
-      copy.set(input);
-      audioChunks.push(copy);
-      totalSamples += copy.length;
-    };
-
-    processorNode.connect(silentGain);
-    silentGain.connect(audioContext.destination);
 
     isRecording = true;
     isStoppingRecording = false;
@@ -570,6 +673,15 @@ async function startRecording() {
     syncActionButtons();
   } catch (error) {
     console.error(error);
+    if (systemCaptureActive) {
+      try {
+        await invoke('stop_system_audio_recording');
+      } catch {
+        // ignore cleanup failure
+      }
+      systemCaptureActive = false;
+    }
+    microphoneCaptureActive = false;
     await cleanupRecordingGraph();
     const message = error instanceof Error ? error.message : String(error);
     setStatus(`Capture error: ${message}`, 'error');
@@ -585,22 +697,61 @@ async function stopRecording() {
   stopTimer();
 
   try {
-    await cleanupRecordingGraph();
+    let micWav = null;
+    let systemWav = null;
 
-    if (totalSamples === 0) {
+    if (microphoneCaptureActive) {
+      await cleanupRecordingGraph();
+      if (totalSamples > 0) {
+        const merged = mergeChunks(audioChunks, totalSamples);
+        const downsampled = downsampleBuffer(merged, sampleRate, 16000);
+        micWav = encodeWav(downsampled, 16000);
+      }
+    } else {
+      await cleanupRecordingGraph();
+    }
+
+    audioChunks = [];
+    totalSamples = 0;
+
+    if (systemCaptureActive) {
+      try {
+        const rawBytes = await invoke('stop_system_audio_recording');
+        systemWav = normalizeWavTo16k(Uint8Array.from(rawBytes || []));
+      } catch (error) {
+        if (activeCaptureMode === 'system') {
+          throw error;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        setStatus(`System audio warning: ${message}. Using microphone capture only.`, 'warning');
+      }
+    }
+    systemCaptureActive = false;
+    microphoneCaptureActive = false;
+
+    if (activeCaptureMode === 'system') {
+      recordedWav = systemWav;
+    } else if (activeCaptureMode === 'both') {
+      if (systemWav && micWav) {
+        recordedWav = mergeSystemAndMic(systemWav, micWav);
+      } else {
+        recordedWav = systemWav || micWav;
+      }
+    } else {
+      recordedWav = micWav;
+    }
+
+    if (!recordedWav || recordedWav.length <= 44) {
       setStatus('No audio captured. Try again.', 'error');
       syncActionButtons();
       return;
     }
 
-    const merged = mergeChunks(audioChunks, totalSamples);
-    const downsampled = downsampleBuffer(merged, sampleRate, 16000);
-    recordedWav = encodeWav(downsampled, 16000);
-
-    audioChunks = [];
-    totalSamples = 0;
-
     setStatus('Recording ready to transcribe', 'ready');
+    syncActionButtons();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    setStatus(`Stop error: ${message}`, 'error');
     syncActionButtons();
   } finally {
     isStoppingRecording = false;

@@ -85,9 +85,10 @@ In debug mode, if sidecar is unavailable, Echo Scribe attempts local fallback di
 ## System Audio Capture Notes
 
 - Use `Capture Source` in the Recorder section to choose `System audio only` or `System audio + microphone`.
-- macOS will prompt you to share a screen/window when using system audio modes.
-- In that picker, choose a source with audio sharing enabled; if no audio track is shared, Echo Scribe will show an error and stop recording.
+- System audio capture uses a native macOS sidecar (ScreenCaptureKit) and does not require picking a window.
+- On first use, macOS asks for `Screen Recording` permission (and `Microphone` permission if mic mode is also enabled).
+- If permission is denied, open `System Settings > Privacy & Security` and enable access for Echo Scribe.
 
 ## Release / CI
 
-The GitHub workflow builds macOS arm64 only and compiles `whisper-cli` from pinned `ggml-org/whisper.cpp` source, then bundles it as a Tauri sidecar.
+The GitHub workflow builds macOS arm64 only, compiles `whisper-cli` plus the native `system-audio-capture` sidecar, then bundles both into the app.

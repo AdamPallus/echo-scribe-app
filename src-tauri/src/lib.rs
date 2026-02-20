@@ -2,10 +2,12 @@ use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command as StdCommand;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::{AppHandle, Emitter, Manager};
+use std::process::{Child, Command as StdCommand, Stdio};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_shell::ShellExt;
 use time::{format_description::well_known::Rfc3339, macros::format_description, OffsetDateTime};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -173,6 +175,16 @@ struct WhisperOutput {
     success: bool,
     stderr: Vec<u8>,
     used_sidecar: bool,
+}
+
+struct SystemAudioCaptureSession {
+    child: Child,
+    output_path: PathBuf,
+}
+
+#[derive(Default)]
+struct SystemAudioCaptureState {
+    session: Mutex<Option<SystemAudioCaptureSession>>,
 }
 
 fn emit_progress(app: &AppHandle, percent: u32, message: &str) {
@@ -399,6 +411,36 @@ fn sidecar_binary_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let parent = exe.parent()?;
     Some(parent.join("whisper-cli"))
+}
+
+fn system_audio_capture_sidecar_candidates() -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("system-audio-capture"));
+        }
+    }
+
+    if let Ok(cwd) = std::env::current_dir() {
+        candidates.push(cwd.join("binaries/system-audio-capture-aarch64-apple-darwin"));
+        candidates.push(cwd.join("src-tauri/binaries/system-audio-capture-aarch64-apple-darwin"));
+        candidates
+            .push(cwd.join("../src-tauri/binaries/system-audio-capture-aarch64-apple-darwin"));
+    }
+
+    candidates.push(PathBuf::from("system-audio-capture"));
+    candidates
+}
+
+fn resolve_system_audio_capture_sidecar_path() -> PathBuf {
+    for candidate in system_audio_capture_sidecar_candidates() {
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+
+    PathBuf::from("system-audio-capture")
 }
 
 fn is_sidecar_available() -> bool {
@@ -858,6 +900,137 @@ async fn download_model(
 }
 
 #[tauri::command]
+async fn start_system_audio_recording(
+    state: State<'_, SystemAudioCaptureState>,
+) -> Result<(), String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = state;
+        return Err("System audio capture is only supported on macOS.".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut guard = state
+            .session
+            .lock()
+            .map_err(|_| "Failed to lock system audio state.".to_string())?;
+
+        if guard.is_some() {
+            return Err("System audio capture is already running.".to_string());
+        }
+
+        let timestamp = unix_timestamp_secs()?;
+        let temp_dir = std::env::temp_dir().join("echo-scribe");
+        fs::create_dir_all(&temp_dir)
+            .map_err(|e| format!("Failed to create temporary directory: {}", e))?;
+        let output_path = temp_dir.join(format!("system-audio-{}.wav", timestamp));
+
+        let sidecar_path = resolve_system_audio_capture_sidecar_path();
+        let mut command = StdCommand::new(&sidecar_path);
+        command
+            .arg("record")
+            .arg("--output")
+            .arg(&output_path)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped());
+
+        let child = command.spawn().map_err(|e| {
+            format!(
+                "Failed to start system audio capture binary ({}): {}",
+                sidecar_path.display(),
+                e
+            )
+        })?;
+
+        *guard = Some(SystemAudioCaptureSession { child, output_path });
+        Ok(())
+    }
+}
+
+#[tauri::command]
+async fn stop_system_audio_recording(
+    state: State<'_, SystemAudioCaptureState>,
+) -> Result<Vec<u8>, String> {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = state;
+        return Err("System audio capture is only supported on macOS.".to_string());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let mut session = {
+            let mut guard = state
+                .session
+                .lock()
+                .map_err(|_| "Failed to lock system audio state.".to_string())?;
+
+            guard
+                .take()
+                .ok_or_else(|| "System audio capture is not currently running.".to_string())?
+        };
+
+        let _ = session.child.stdin.take();
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let status = loop {
+            if let Some(status) = session
+                .child
+                .try_wait()
+                .map_err(|e| format!("Failed to wait for system audio capture process: {}", e))?
+            {
+                break status;
+            }
+
+            if Instant::now() >= deadline {
+                let _ = session.child.kill();
+                let _ = session.child.wait();
+                return Err(
+                    "Timed out while stopping system audio capture. Please try again.".to_string(),
+                );
+            }
+
+            std::thread::sleep(Duration::from_millis(50));
+        };
+
+        let mut stderr = Vec::new();
+        if let Some(mut stderr_reader) = session.child.stderr.take() {
+            let _ = stderr_reader.read_to_end(&mut stderr);
+        }
+
+        if !status.success() {
+            let stderr_text = String::from_utf8_lossy(&stderr).trim().to_string();
+            let _ = fs::remove_file(&session.output_path);
+            if stderr_text.is_empty() {
+                return Err("System audio capture exited with an error.".to_string());
+            }
+            return Err(format!("System audio capture failed: {}", stderr_text));
+        }
+
+        let wav_data = fs::read(&session.output_path).map_err(|e| {
+            format!(
+                "Failed to read captured system audio file ({}): {}",
+                session.output_path.display(),
+                e
+            )
+        })?;
+
+        let _ = fs::remove_file(&session.output_path);
+
+        if wav_data.len() <= 44 {
+            return Err(
+                "No shared audio was captured. Start playback first, then record again."
+                    .to_string(),
+            );
+        }
+
+        Ok(wav_data)
+    }
+}
+
+#[tauri::command]
 async fn transcribe_recording(
     app: AppHandle,
     options: TranscriptionOptions,
@@ -1112,6 +1285,7 @@ async fn show_in_folder(path: String) -> Result<(), String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(SystemAudioCaptureState::default())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
@@ -1123,6 +1297,8 @@ pub fn run() {
             get_coachnotes_clients,
             set_coachnotes_settings,
             download_model,
+            start_system_audio_recording,
+            stop_system_audio_recording,
             transcribe_recording,
             show_in_folder
         ])

@@ -25,7 +25,8 @@
     "active": true,
     "targets": "all",
     "externalBin": [
-      "binaries/whisper-cli"
+      "binaries/whisper-cli",
+      "binaries/system-audio-capture"
     ],
     "macOS": {
       "infoPlist": "Info.plist"
