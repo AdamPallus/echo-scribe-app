@@ -71,7 +71,7 @@ The 2-speaker mode is best-effort and currently constrained to:
 - Language: `en`
 - Model: `small.en-tdrz`
 
-If constraints are not met, Echo Scribe falls back to standard transcription and reports a warning.
+When enabled in the UI, Echo Scribe auto-switches to English + `small.en-tdrz`.
 
 ## Development
 
@@ -88,6 +88,8 @@ In debug mode, if sidecar is unavailable, Echo Scribe attempts local fallback di
 - System audio capture uses a native macOS sidecar (ScreenCaptureKit) and does not require picking a window.
 - On first use, macOS asks for `Screen Recording` permission (and `Microphone` permission if mic mode is also enabled).
 - If permission is denied, open `System Settings > Privacy & Security` and enable access for Echo Scribe.
+- Default capture mode is `System audio + microphone`.
+- Default language is `English`.
 
 ## Release / CI
 

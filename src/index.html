@@ -13,55 +13,57 @@
       <h1>Echo Scribe</h1>
       <p class="subtitle">Record on-device and transcribe locally with bundled whisper sidecar + local models.</p>
 
-      <section class="card setup-card">
-        <div class="section-head">
+      <details id="setup-details" class="card setup-card">
+        <summary class="setup-summary">
           <h2>Setup</h2>
           <span id="setup-pill" class="pill warning">Setup required</span>
-        </div>
+        </summary>
 
-        <p id="setup-message" class="setup-message">Download a model to enable local transcription.</p>
-        <p id="sidecar-status" class="small-text"></p>
+        <div class="setup-content">
+          <p id="setup-message" class="setup-message">Download a model to enable local transcription.</p>
+          <p id="sidecar-status" class="small-text"></p>
 
-        <div class="download-row">
-          <button id="download-model-btn" class="btn btn-accent">Download Selected Model</button>
-          <p id="model-status-text" class="small-text"></p>
-        </div>
-
-        <div id="model-progress-wrap" class="model-progress-wrap" hidden>
-          <div class="progress-bar">
-            <div id="model-progress-fill" class="progress-fill"></div>
+          <div class="download-row">
+            <button id="download-model-btn" class="btn btn-accent">Download Selected Model</button>
+            <p id="model-status-text" class="small-text"></p>
           </div>
-          <p id="model-progress-text" class="progress-text">Starting download...</p>
-        </div>
 
-        <div class="option-group">
-          <label for="transcript-dir">Standard Transcript Save Folder</label>
-          <div class="directory-row">
-            <input id="transcript-dir" type="text" readonly />
-            <button id="choose-dir-btn" class="btn btn-secondary">Choose Folder</button>
+          <div id="model-progress-wrap" class="model-progress-wrap" hidden>
+            <div class="progress-bar">
+              <div id="model-progress-fill" class="progress-fill"></div>
+            </div>
+            <p id="model-progress-text" class="progress-text">Starting download...</p>
           </div>
-        </div>
 
-        <label class="checkbox-row coach-toggle">
-          <input id="coachnotes-enabled" type="checkbox" />
-          Enable CoachNotes Mode (optional)
-        </label>
-
-        <div class="option-group">
-          <label for="coachnotes-root-dir">CoachNotes Root Folder</label>
-          <div class="directory-row">
-            <input id="coachnotes-root-dir" type="text" readonly />
-            <button id="choose-coachnotes-dir-btn" class="btn btn-secondary">Choose Folder</button>
+          <div class="option-group">
+            <label for="transcript-dir">Standard Transcript Save Folder</label>
+            <div class="directory-row">
+              <input id="transcript-dir" type="text" readonly />
+              <button id="choose-dir-btn" class="btn btn-secondary">Choose Folder</button>
+            </div>
           </div>
-        </div>
 
-        <div class="option-group">
-          <label for="coachnotes-client-select">CoachNotes Client</label>
-          <select id="coachnotes-client-select"></select>
-        </div>
+          <label class="checkbox-row coach-toggle">
+            <input id="coachnotes-enabled" type="checkbox" />
+            Enable CoachNotes Mode (optional)
+          </label>
 
-        <p id="destination-preview" class="destination-preview"></p>
-      </section>
+          <div class="option-group">
+            <label for="coachnotes-root-dir">CoachNotes Root Folder</label>
+            <div class="directory-row">
+              <input id="coachnotes-root-dir" type="text" readonly />
+              <button id="choose-coachnotes-dir-btn" class="btn btn-secondary">Choose Folder</button>
+            </div>
+          </div>
+
+          <div class="option-group">
+            <label for="coachnotes-client-select">CoachNotes Client</label>
+            <select id="coachnotes-client-select"></select>
+          </div>
+
+          <p id="destination-preview" class="destination-preview"></p>
+        </div>
+      </details>
 
       <section class="card options-card">
         <h2>Transcription Options</h2>
@@ -80,8 +82,8 @@
         <div class="option-group">
           <label for="language-select">Language</label>
           <select id="language-select">
-            <option value="auto" selected>Auto-detect</option>
-            <option value="en">English</option>
+            <option value="auto">Auto-detect</option>
+            <option value="en" selected>English</option>
             <option value="es">Spanish</option>
             <option value="fr">French</option>
             <option value="de">German</option>
@@ -110,13 +112,13 @@
         <div class="option-group">
           <label for="capture-mode-select">Capture Source</label>
           <select id="capture-mode-select">
-            <option value="microphone" selected>Microphone only</option>
+            <option value="microphone">Microphone only</option>
             <option value="system">System audio only (video call / speakers)</option>
-            <option value="both">System audio + microphone</option>
+            <option value="both" selected>System audio + microphone</option>
           </select>
         </div>
         <p id="capture-mode-help" class="small-text">
-          For system audio modes, macOS will ask you to share a screen/window. Enable audio sharing in that prompt.
+          Captures system audio and microphone together (native system capture + mic mix).
         </p>
         <p id="recording-status" class="status idle">Ready to record</p>
         <p id="recording-timer" class="timer">00:00</p>

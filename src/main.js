@@ -6,6 +6,7 @@ const modelSelect = document.getElementById('model-select');
 const languageSelect = document.getElementById('language-select');
 const diarizationModeSelect = document.getElementById('diarization-mode-select');
 const saveMarkdownCheckbox = document.getElementById('save-markdown');
+const setupDetails = document.getElementById('setup-details');
 
 const setupPill = document.getElementById('setup-pill');
 const setupMessage = document.getElementById('setup-message');
@@ -41,6 +42,7 @@ const openFileBtn = document.getElementById('open-file-btn');
 
 let setupState = null;
 let modelDownloadInProgress = false;
+const DIARIZATION_MODEL_ID = 'small.en-tdrz';
 
 let captureStreams = [];
 let audioContext = null;
@@ -133,6 +135,51 @@ function updateCaptureModeHelp() {
       'Captures system audio and microphone together (native system capture + mic mix).';
   } else {
     captureModeHelp.textContent = 'Records local microphone input from this Mac.';
+  }
+}
+
+async function applyModelSelection(modelId) {
+  if (modelSelect.value === modelId) {
+    return;
+  }
+
+  modelSelect.value = modelId;
+  setupState = await invoke('set_selected_model', { model: modelId });
+  recordedWav = null;
+  renderSetupState();
+}
+
+async function ensureTwoSpeakerRequirements() {
+  if (diarizationModeSelect.value !== 'tdrz_2speaker') {
+    return true;
+  }
+
+  try {
+    let changed = false;
+
+    if (languageSelect.value !== 'en') {
+      languageSelect.value = 'en';
+      changed = true;
+    }
+
+    if (modelSelect.value !== DIARIZATION_MODEL_ID) {
+      await applyModelSelection(DIARIZATION_MODEL_ID);
+      changed = true;
+    }
+
+    if (changed) {
+      if (selectedModelReady()) {
+        setStatus('2-speaker mode is active (small.en-tdrz + English).', 'idle');
+      } else {
+        setStatus('2-speaker mode selected. Download small.en-tdrz to continue.', 'warning');
+      }
+    }
+
+    return true;
+  } catch (error) {
+    diarizationModeSelect.value = 'none';
+    setStatus(`Could not enable 2-speaker mode: ${String(error)}`, 'error');
+    return false;
   }
 }
 
@@ -300,6 +347,10 @@ function renderSetupState() {
   chooseDirBtn.disabled = modelDownloadInProgress || isTranscribing;
   chooseCoachnotesDirBtn.disabled = modelDownloadInProgress || isTranscribing || !coachEnabled;
   coachnotesClientSelect.disabled = modelDownloadInProgress || isTranscribing || !coachEnabled;
+
+  if (setupDetails && (modelDownloadInProgress || !setupState.ready)) {
+    setupDetails.open = true;
+  }
 
   updateDestinationPreview();
   syncActionButtons();
@@ -764,6 +815,9 @@ async function transcribeRecording() {
     setStatus('Selected model is not downloaded.', 'error');
     return;
   }
+  if (!(await ensureTwoSpeakerRequirements())) {
+    return;
+  }
 
   progressSection.hidden = false;
   resultSection.hidden = true;
@@ -815,6 +869,11 @@ modelSelect.addEventListener('change', async () => {
     setupState = await invoke('set_selected_model', { model: modelSelect.value });
     recordedWav = null;
     renderSetupState();
+
+    if (diarizationModeSelect.value === 'tdrz_2speaker' && modelSelect.value !== DIARIZATION_MODEL_ID) {
+      diarizationModeSelect.value = 'none';
+      setStatus('2-speaker mode disabled. It requires the small.en-tdrz model.', 'warning');
+    }
   } catch (error) {
     setStatus(`Failed to update model: ${String(error)}`, 'error');
   }
@@ -911,16 +970,21 @@ saveMarkdownCheckbox.addEventListener('change', () => {
   syncActionButtons();
 });
 
+languageSelect.addEventListener('change', async () => {
+  if (diarizationModeSelect.value === 'tdrz_2speaker') {
+    await ensureTwoSpeakerRequirements();
+  }
+});
+
 captureModeSelect.addEventListener('change', () => {
   updateCaptureModeHelp();
 });
 
-diarizationModeSelect.addEventListener('change', () => {
+diarizationModeSelect.addEventListener('change', async () => {
   if (diarizationModeSelect.value === 'tdrz_2speaker') {
-    setStatus(
-      '2-speaker mode is experimental and English-only; requires small.en-tdrz model.',
-      'idle'
-    );
+    await ensureTwoSpeakerRequirements();
+  } else {
+    setStatus('Standard transcription mode selected.', 'idle');
   }
 });
 

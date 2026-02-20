@@ -53,6 +53,41 @@ h1 {
   font-size: 1.05rem;
 }
 
+.setup-card {
+  padding: 0;
+}
+
+.setup-summary {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  list-style: none;
+  padding: 16px;
+}
+
+.setup-summary::-webkit-details-marker {
+  display: none;
+}
+
+.setup-summary::after {
+  color: var(--muted);
+  content: '▸';
+  font-size: 0.95rem;
+  margin-left: 8px;
+  transform: rotate(0deg);
+  transition: transform 0.2s ease;
+}
+
+.setup-card[open] .setup-summary::after {
+  transform: rotate(90deg);
+}
+
+.setup-content {
+  border-top: 1px solid var(--panel-border);
+  padding: 14px 16px 16px;
+}
+
 .section-head {
   align-items: center;
   display: flex;
