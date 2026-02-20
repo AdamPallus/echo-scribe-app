@@ -84,12 +84,24 @@ jobs:
         with:
           args: --target ${{ env.TARGET }}
 
+      - name: Ad-hoc sign app bundle and rebuild DMG
+        run: |
+          set -euxo pipefail
+          APP_PATH="src-tauri/target/${TARGET}/release/bundle/macos/Echo Scribe.app"
+          DMG_PATH="$(ls src-tauri/target/${TARGET}/release/bundle/dmg/*.dmg | head -n1)"
+
+          codesign --force --sign - "${APP_PATH}/Contents/MacOS/whisper-cli"
+          codesign --force --deep --sign - "${APP_PATH}"
+          codesign --verify --deep --strict --verbose=4 "${APP_PATH}"
+
+          rm -f "${DMG_PATH}"
+          hdiutil create -volname "Echo Scribe" -srcfolder "${APP_PATH}" -ov -format UDZO "${DMG_PATH}"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: echo-scribe-macOS-arm64
           path: |
-            src-tauri/target/${{ env.TARGET }}/release/bundle/macos/*.app
             src-tauri/target/${{ env.TARGET }}/release/bundle/dmg/*.dmg
 
   release:
