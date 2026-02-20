@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="styles.css" />
+    <title>Echo Scribe</title>
+    <script type="module" src="/main.js" defer></script>
+  </head>
+
+  <body>
+    <main class="container">
+      <h1>Echo Scribe</h1>
+      <p class="subtitle">Record on-device and transcribe locally with bundled whisper sidecar + local models.</p>
+
+      <section class="card setup-card">
+        <div class="section-head">
+          <h2>Setup</h2>
+          <span id="setup-pill" class="pill warning">Setup required</span>
+        </div>
+
+        <p id="setup-message" class="setup-message">Download a model to enable local transcription.</p>
+        <p id="sidecar-status" class="small-text"></p>
+
+        <div class="download-row">
+          <button id="download-model-btn" class="btn btn-accent">Download Selected Model</button>
+          <p id="model-status-text" class="small-text"></p>
+        </div>
+
+        <div id="model-progress-wrap" class="model-progress-wrap" hidden>
+          <div class="progress-bar">
+            <div id="model-progress-fill" class="progress-fill"></div>
+          </div>
+          <p id="model-progress-text" class="progress-text">Starting download...</p>
+        </div>
+
+        <div class="option-group">
+          <label for="transcript-dir">Standard Transcript Save Folder</label>
+          <div class="directory-row">
+            <input id="transcript-dir" type="text" readonly />
+            <button id="choose-dir-btn" class="btn btn-secondary">Choose Folder</button>
+          </div>
+        </div>
+
+        <label class="checkbox-row coach-toggle">
+          <input id="coachnotes-enabled" type="checkbox" />
+          Enable CoachNotes Mode (optional)
+        </label>
+
+        <div class="option-group">
+          <label for="coachnotes-root-dir">CoachNotes Root Folder</label>
+          <div class="directory-row">
+            <input id="coachnotes-root-dir" type="text" readonly />
+            <button id="choose-coachnotes-dir-btn" class="btn btn-secondary">Choose Folder</button>
+          </div>
+        </div>
+
+        <div class="option-group">
+          <label for="coachnotes-client-select">CoachNotes Client</label>
+          <select id="coachnotes-client-select"></select>
+        </div>
+
+        <p id="destination-preview" class="destination-preview"></p>
+      </section>
+
+      <section class="card options-card">
+        <h2>Transcription Options</h2>
+
+        <div class="option-group">
+          <label for="model-select">Whisper model</label>
+          <select id="model-select">
+            <option value="tiny">Tiny (fastest)</option>
+            <option value="base" selected>Base (recommended on Air)</option>
+            <option value="small">Small (higher quality)</option>
+            <option value="medium">Medium (best quality, slower)</option>
+            <option value="small.en-tdrz">Small.en-tdrz (experimental 2-speaker)</option>
+          </select>
+        </div>
+
+        <div class="option-group">
+          <label for="language-select">Language</label>
+          <select id="language-select">
+            <option value="auto" selected>Auto-detect</option>
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="zh">Chinese</option>
+          </select>
+        </div>
+
+        <div class="option-group">
+          <label for="diarization-mode-select">Speaker mode</label>
+          <select id="diarization-mode-select">
+            <option value="none" selected>Standard transcription</option>
+            <option value="tdrz_2speaker">Experimental 2-speaker (English only)</option>
+          </select>
+        </div>
+
+        <label class="checkbox-row">
+          <input id="save-markdown" type="checkbox" checked />
+          Save transcript as Markdown (.md)
+        </label>
+      </section>
+
+      <section class="card recorder-card">
+        <h2>Recorder</h2>
+        <p id="recording-status" class="status idle">Ready to record</p>
+        <p id="recording-timer" class="timer">00:00</p>
+
+        <div class="controls">
+          <button id="start-btn" class="btn btn-primary">Start Recording</button>
+          <button id="stop-btn" class="btn btn-danger" disabled>Stop</button>
+          <button id="transcribe-btn" class="btn btn-accent" disabled>Transcribe</button>
+        </div>
+      </section>
+
+      <section id="progress-section" class="card" hidden>
+        <h2>Transcription Progress</h2>
+        <div class="progress-bar">
+          <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <p id="progress-text" class="progress-text">Initializing...</p>
+      </section>
+
+      <section id="result-section" class="card" hidden>
+        <div class="result-header">
+          <h2>Transcript</h2>
+          <button id="open-file-btn" class="btn btn-secondary" hidden>Show Saved File</button>
+        </div>
+        <ul id="warnings-list" class="warnings-list" hidden></ul>
+        <pre id="transcript-output" class="transcript-output"></pre>
+      </section>
+    </main>
+  </body>
+</html>

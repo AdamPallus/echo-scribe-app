@@ -1,0 +1,28 @@
+[package]
+name = "echo-scribe"
+version = "0.1.0"
+description = "Local-first audio recorder and transcriber using whisper.cpp models"
+authors = ["Adam Pallus"]
+edition = "2021"
+
+[lib]
+name = "echo_scribe_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+dirs = "5"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+futures-util = "0.3"
+sha2 = "0.10"
+time = { version = "0.3", features = ["formatting", "local-offset", "macros"] }

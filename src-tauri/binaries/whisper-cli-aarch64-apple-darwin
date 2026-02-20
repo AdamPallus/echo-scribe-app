@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+echo "Echo Scribe whisper sidecar placeholder. Build pipeline replaces this file."
+exit 1
