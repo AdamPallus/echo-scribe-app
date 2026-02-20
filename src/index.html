@@ -65,6 +65,29 @@
         </div>
       </details>
 
+      <section class="card recorder-card">
+        <h2>Recorder</h2>
+        <div class="option-group">
+          <label for="capture-mode-select">Capture Source</label>
+          <select id="capture-mode-select">
+            <option value="microphone">Microphone only</option>
+            <option value="system">System audio only (video call / speakers)</option>
+            <option value="both" selected>System audio + microphone</option>
+          </select>
+        </div>
+        <p id="capture-mode-help" class="small-text">
+          Captures system audio and microphone together (native system capture + mic mix).
+        </p>
+        <p id="recording-status" class="status idle">Ready to record</p>
+        <p id="recording-timer" class="timer">00:00</p>
+
+        <div class="controls">
+          <button id="start-btn" class="btn btn-primary">Start Recording</button>
+          <button id="stop-btn" class="btn btn-danger" disabled>Stop</button>
+          <button id="transcribe-btn" class="btn btn-accent" disabled>Transcribe</button>
+        </div>
+      </section>
+
       <section class="card options-card">
         <h2>Transcription Options</h2>
 
@@ -105,29 +128,6 @@
           <input id="save-markdown" type="checkbox" checked />
           Save transcript as Markdown (.md)
         </label>
-      </section>
-
-      <section class="card recorder-card">
-        <h2>Recorder</h2>
-        <div class="option-group">
-          <label for="capture-mode-select">Capture Source</label>
-          <select id="capture-mode-select">
-            <option value="microphone">Microphone only</option>
-            <option value="system">System audio only (video call / speakers)</option>
-            <option value="both" selected>System audio + microphone</option>
-          </select>
-        </div>
-        <p id="capture-mode-help" class="small-text">
-          Captures system audio and microphone together (native system capture + mic mix).
-        </p>
-        <p id="recording-status" class="status idle">Ready to record</p>
-        <p id="recording-timer" class="timer">00:00</p>
-
-        <div class="controls">
-          <button id="start-btn" class="btn btn-primary">Start Recording</button>
-          <button id="stop-btn" class="btn btn-danger" disabled>Stop</button>
-          <button id="transcribe-btn" class="btn btn-accent" disabled>Transcribe</button>
-        </div>
       </section>
 
       <section id="progress-section" class="card" hidden>

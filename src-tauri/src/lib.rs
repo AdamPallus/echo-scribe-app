@@ -600,7 +600,7 @@ fn apply_tdrz_speaker_labels(text: &str) -> (String, bool) {
 
 fn build_markdown_transcript(
     transcript: &str,
-    client: Option<&str>,
+    coachnotes_client: Option<&str>,
     model: &str,
     language: &str,
     diarization_mode: &str,
@@ -610,7 +610,7 @@ fn build_markdown_transcript(
     coachnotes_metadata: bool,
     diarization_applied: bool,
 ) -> String {
-    let client_value = client.unwrap_or("");
+    let client_value = coachnotes_client.unwrap_or("");
 
     if coachnotes_metadata {
         let (speaker_1, speaker_2) = if diarization_applied {
@@ -641,10 +641,9 @@ fn build_markdown_transcript(
     }
 
     format!(
-        "---\ntitle: {}\ndate: {}\nclient: {}\nsource_app: {}\ncreated_at: {}\nmodel: {}\nlanguage: {}\ndiarization_mode: {}\nduration_seconds: {}\n---\n# Transcript\n\n{}\n",
+        "---\ntitle: {}\ndate: {}\nsource_app: {}\ncreated_at: {}\nmodel: {}\nlanguage: {}\ndiarization_mode: {}\nduration_seconds: {}\n---\n# Transcript\n\n{}\n",
         yaml_quote("Session Transcript"),
         yaml_quote(date),
-        yaml_quote(client_value),
         yaml_quote("Echo Scribe"),
         yaml_quote(created_at),
         yaml_quote(model),
@@ -1152,7 +1151,7 @@ async fn transcribe_recording(
         let (formatted, applied) = apply_tdrz_speaker_labels(&transcript_raw);
         if !applied {
             warnings.push(
-                "2-speaker mode did not produce speaker boundaries. Output is unsegmented."
+                "2-speaker mode did not produce speaker boundaries because whisper.cpp returned no [SPEAKER_TURN] markers. Output is unsegmented. This is common when voices are too similar/overlapped or only one voice is dominant; try clearer turn-taking, louder remote audio, or retry with cleaner input."
                     .to_string(),
             );
         }
@@ -1220,9 +1219,13 @@ async fn transcribe_recording(
     let created_at = format_iso8601(now);
     let created_date = format_date(now);
 
-    let frontmatter_client = sanitize_non_empty(options.client.clone())
-        .or_else(|| sanitize_non_empty(settings.coachnotes_client.clone()));
     let coachnotes_metadata = output_mode == "coachnotes" && settings.coachnotes_enabled;
+    let frontmatter_client = if coachnotes_metadata {
+        sanitize_non_empty(options.client.clone())
+            .or_else(|| sanitize_non_empty(settings.coachnotes_client.clone()))
+    } else {
+        None
+    };
 
     let markdown = build_markdown_transcript(
         &transcript,
