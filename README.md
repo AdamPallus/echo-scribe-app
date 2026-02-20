@@ -27,6 +27,27 @@ Supported models:
 
 Saved transcripts are Markdown with YAML frontmatter:
 
+Standard mode (`CoachNotes mode` off):
+
+```md
+---
+title: "Session Transcript"
+date: "YYYY-MM-DD"
+client: "Client Name"
+source_app: "Echo Scribe"
+created_at: "ISO-8601"
+model: "base|small|medium|small.en-tdrz"
+language: "auto|en|..."
+diarization_mode: "none|tdrz_2speaker"
+duration_seconds: 0
+---
+# Transcript
+
+...content...
+```
+
+CoachNotes mode (`CoachNotes mode` on):
+
 ```md
 ---
 client: "Client Name"
@@ -52,6 +73,8 @@ duration_seconds: 0
 
 ...content...
 ```
+
+You can re-run transcription on the same recording by changing model/language/speaker mode and pressing `Transcribe Again`.
 
 ## CoachNotes Mode
 

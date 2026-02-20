@@ -63,6 +63,7 @@ let totalSamples = 0;
 let sampleRate = 44100;
 let recordedWav = null;
 let savedTranscriptPath = null;
+let hasTranscriptionResult = false;
 
 function setStatus(message, state = 'idle') {
   statusEl.textContent = message;
@@ -146,6 +147,7 @@ async function applyModelSelection(modelId) {
   modelSelect.value = modelId;
   setupState = await invoke('set_selected_model', { model: modelId });
   recordedWav = null;
+  hasTranscriptionResult = false;
   renderSetupState();
 }
 
@@ -273,6 +275,7 @@ function syncActionButtons() {
     startBtn.disabled = true;
     stopBtn.disabled = false;
     transcribeBtn.disabled = true;
+    transcribeBtn.textContent = 'Transcribe';
     return;
   }
 
@@ -285,6 +288,8 @@ function syncActionButtons() {
     isSavingCoachnotesSettings ||
     !recordedWav ||
     !canTranscribe;
+
+  transcribeBtn.textContent = hasTranscriptionResult ? 'Transcribe Again' : 'Transcribe';
 }
 
 function renderSetupState() {
@@ -704,6 +709,7 @@ async function startRecording() {
     audioChunks = [];
     totalSamples = 0;
     recordedWav = null;
+    hasTranscriptionResult = false;
     savedTranscriptPath = null;
 
     isRecording = true;
@@ -798,6 +804,7 @@ async function stopRecording() {
       return;
     }
 
+    hasTranscriptionResult = false;
     setStatus('Recording ready to transcribe', 'ready');
     syncActionButtons();
   } catch (error) {
@@ -855,6 +862,7 @@ async function transcribeRecording() {
     } else {
       setStatus('Transcription complete', 'ready');
     }
+    hasTranscriptionResult = true;
   } catch (error) {
     renderWarnings([]);
     setStatus(`Transcription failed: ${String(error)}`, 'error');
@@ -868,6 +876,7 @@ modelSelect.addEventListener('change', async () => {
   try {
     setupState = await invoke('set_selected_model', { model: modelSelect.value });
     recordedWav = null;
+    hasTranscriptionResult = false;
     renderSetupState();
 
     if (diarizationModeSelect.value === 'tdrz_2speaker' && modelSelect.value !== DIARIZATION_MODEL_ID) {
@@ -1021,6 +1030,7 @@ listen('model-download-progress', (event) => {
 async function boot() {
   resetTimer();
   updateCaptureModeHelp();
+  hasTranscriptionResult = false;
   setStatus('Ready to record', 'idle');
 
   try {
