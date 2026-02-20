@@ -107,6 +107,17 @@
 
       <section class="card recorder-card">
         <h2>Recorder</h2>
+        <div class="option-group">
+          <label for="capture-mode-select">Capture Source</label>
+          <select id="capture-mode-select">
+            <option value="microphone" selected>Microphone only</option>
+            <option value="system">System audio only (video call / speakers)</option>
+            <option value="both">System audio + microphone</option>
+          </select>
+        </div>
+        <p id="capture-mode-help" class="small-text">
+          For system audio modes, macOS will ask you to share a screen/window. Enable audio sharing in that prompt.
+        </p>
         <p id="recording-status" class="status idle">Ready to record</p>
         <p id="recording-timer" class="timer">00:00</p>
 

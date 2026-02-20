@@ -23,6 +23,8 @@ const coachnotesRootDirInput = document.getElementById('coachnotes-root-dir');
 const chooseCoachnotesDirBtn = document.getElementById('choose-coachnotes-dir-btn');
 const coachnotesClientSelect = document.getElementById('coachnotes-client-select');
 const destinationPreview = document.getElementById('destination-preview');
+const captureModeSelect = document.getElementById('capture-mode-select');
+const captureModeHelp = document.getElementById('capture-mode-help');
 
 const startBtn = document.getElementById('start-btn');
 const stopBtn = document.getElementById('stop-btn');
@@ -40,14 +42,15 @@ const openFileBtn = document.getElementById('open-file-btn');
 let setupState = null;
 let modelDownloadInProgress = false;
 
-let mediaStream = null;
+let captureStreams = [];
 let audioContext = null;
-let sourceNode = null;
+let sourceNodes = [];
 let processorNode = null;
 let silentGain = null;
 let recordingStartTime = null;
 let timerInterval = null;
 let isRecording = false;
+let isStoppingRecording = false;
 let isTranscribing = false;
 let isSavingCoachnotesSettings = false;
 let audioChunks = [];
@@ -107,6 +110,24 @@ function coachnotesEnabled() {
 
 function getOutputMode() {
   return coachnotesEnabled() ? 'coachnotes' : 'standard';
+}
+
+function selectedCaptureMode() {
+  return captureModeSelect.value || 'microphone';
+}
+
+function captureModeNeedsSystemAudio(mode) {
+  return mode === 'system' || mode === 'both';
+}
+
+function updateCaptureModeHelp() {
+  const mode = selectedCaptureMode();
+  if (captureModeNeedsSystemAudio(mode)) {
+    captureModeHelp.textContent =
+      'macOS will ask you to share a screen/window. Enable audio sharing in that prompt.';
+  } else {
+    captureModeHelp.textContent = 'Records local microphone input from this Mac.';
+  }
 }
 
 function getSelectedCoachnotesClient() {
@@ -192,6 +213,8 @@ function syncActionButtons() {
   const modelReady = selectedModelReady();
   const setupReady = Boolean(setupState && setupState.ready);
   const canTranscribe = setupReady && modelReady;
+  captureModeSelect.disabled =
+    modelDownloadInProgress || isTranscribing || isRecording || isSavingCoachnotesSettings;
 
   if (isRecording) {
     startBtn.disabled = true;
@@ -376,10 +399,11 @@ function encodeWav(samples, rate) {
 }
 
 async function cleanupRecordingGraph() {
-  if (sourceNode) {
-    sourceNode.disconnect();
-    sourceNode = null;
+  for (const node of sourceNodes) {
+    node.disconnect();
   }
+  sourceNodes = [];
+
   if (processorNode) {
     processorNode.disconnect();
     processorNode.onaudioprocess = null;
@@ -389,16 +413,88 @@ async function cleanupRecordingGraph() {
     silentGain.disconnect();
     silentGain = null;
   }
-  if (mediaStream) {
-    for (const track of mediaStream.getTracks()) {
+  for (const stream of captureStreams) {
+    for (const track of stream.getTracks()) {
       track.stop();
     }
-    mediaStream = null;
   }
+  captureStreams = [];
+
   if (audioContext) {
     await audioContext.close();
     audioContext = null;
   }
+}
+
+function extractMonoChannel(inputBuffer) {
+  const channels = inputBuffer.numberOfChannels;
+  const length = inputBuffer.length;
+
+  if (channels === 0) {
+    return new Float32Array(length);
+  }
+
+  if (channels <= 1) {
+    return inputBuffer.getChannelData(0);
+  }
+
+  const mixed = new Float32Array(length);
+  for (let channelIndex = 0; channelIndex < channels; channelIndex++) {
+    const channel = inputBuffer.getChannelData(channelIndex);
+    for (let i = 0; i < length; i++) {
+      mixed[i] += channel[i];
+    }
+  }
+
+  for (let i = 0; i < length; i++) {
+    mixed[i] /= channels;
+  }
+
+  return mixed;
+}
+
+function registerTrackEndHandlers(stream, label) {
+  for (const track of stream.getTracks()) {
+    track.addEventListener('ended', () => {
+      if (isRecording && !isStoppingRecording) {
+        setStatus(`${label} capture ended. Recording stopped.`, 'warning');
+        void stopRecording();
+      }
+    });
+  }
+}
+
+async function requestMicrophoneStream() {
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: false,
+      noiseSuppression: false,
+      autoGainControl: false,
+      channelCount: 1,
+    },
+  });
+}
+
+async function requestSystemAudioStream() {
+  if (!navigator.mediaDevices || typeof navigator.mediaDevices.getDisplayMedia !== 'function') {
+    throw new Error('System audio capture is not supported in this runtime.');
+  }
+
+  const stream = await navigator.mediaDevices.getDisplayMedia({
+    video: true,
+    audio: true,
+  });
+
+  if (stream.getAudioTracks().length === 0) {
+    for (const track of stream.getTracks()) {
+      track.stop();
+    }
+    throw new Error(
+      'No shared audio track was detected. In the sharing prompt, pick a source with audio enabled.'
+    );
+  }
+
+  return stream;
 }
 
 async function startRecording() {
@@ -407,21 +503,37 @@ async function startRecording() {
     return;
   }
 
+  const mode = selectedCaptureMode();
+
   try {
-    mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    const streams = [];
+
+    if (captureModeNeedsSystemAudio(mode)) {
+      setStatus('Choose a screen/window and enable audio sharing...', 'working');
+      const systemStream = await requestSystemAudioStream();
+      registerTrackEndHandlers(systemStream, 'System audio');
+      streams.push(systemStream);
+    }
+
+    if (mode !== 'system') {
+      const micStream = await requestMicrophoneStream();
+      registerTrackEndHandlers(micStream, 'Microphone');
+      streams.push(micStream);
+    }
+
+    captureStreams = streams;
 
     audioContext = new AudioContext();
     sampleRate = audioContext.sampleRate;
-    sourceNode = audioContext.createMediaStreamSource(mediaStream);
     processorNode = audioContext.createScriptProcessor(4096, 1, 1);
     silentGain = audioContext.createGain();
     silentGain.gain.value = 0;
+
+    sourceNodes = captureStreams.map((stream) => {
+      const node = audioContext.createMediaStreamSource(stream);
+      node.connect(processorNode);
+      return node;
+    });
 
     audioChunks = [];
     totalSamples = 0;
@@ -430,55 +542,69 @@ async function startRecording() {
 
     processorNode.onaudioprocess = (event) => {
       if (!isRecording) return;
-      const input = event.inputBuffer.getChannelData(0);
+      const input = extractMonoChannel(event.inputBuffer);
       const copy = new Float32Array(input.length);
       copy.set(input);
       audioChunks.push(copy);
       totalSamples += copy.length;
     };
 
-    sourceNode.connect(processorNode);
     processorNode.connect(silentGain);
     silentGain.connect(audioContext.destination);
 
     isRecording = true;
+    isStoppingRecording = false;
     openFileBtn.hidden = true;
     resultSection.hidden = true;
     progressSection.hidden = true;
 
-    setStatus('Recording...', 'recording');
+    if (mode === 'system') {
+      setStatus('Recording system audio...', 'recording');
+    } else if (mode === 'both') {
+      setStatus('Recording system + microphone...', 'recording');
+    } else {
+      setStatus('Recording microphone...', 'recording');
+    }
+
     startTimer();
     syncActionButtons();
   } catch (error) {
     console.error(error);
-    setStatus(`Microphone error: ${String(error)}`, 'error');
+    await cleanupRecordingGraph();
+    const message = error instanceof Error ? error.message : String(error);
+    setStatus(`Capture error: ${message}`, 'error');
     syncActionButtons();
   }
 }
 
 async function stopRecording() {
-  if (!isRecording) return;
+  if (!isRecording || isStoppingRecording) return;
 
+  isStoppingRecording = true;
   isRecording = false;
   stopTimer();
 
-  await cleanupRecordingGraph();
+  try {
+    await cleanupRecordingGraph();
 
-  if (totalSamples === 0) {
-    setStatus('No audio captured. Try again.', 'error');
+    if (totalSamples === 0) {
+      setStatus('No audio captured. Try again.', 'error');
+      syncActionButtons();
+      return;
+    }
+
+    const merged = mergeChunks(audioChunks, totalSamples);
+    const downsampled = downsampleBuffer(merged, sampleRate, 16000);
+    recordedWav = encodeWav(downsampled, 16000);
+
+    audioChunks = [];
+    totalSamples = 0;
+
+    setStatus('Recording ready to transcribe', 'ready');
     syncActionButtons();
-    return;
+  } finally {
+    isStoppingRecording = false;
   }
-
-  const merged = mergeChunks(audioChunks, totalSamples);
-  const downsampled = downsampleBuffer(merged, sampleRate, 16000);
-  recordedWav = encodeWav(downsampled, 16000);
-
-  audioChunks = [];
-  totalSamples = 0;
-
-  setStatus('Recording ready to transcribe', 'ready');
-  syncActionButtons();
 }
 
 async function transcribeRecording() {
@@ -634,6 +760,10 @@ saveMarkdownCheckbox.addEventListener('change', () => {
   syncActionButtons();
 });
 
+captureModeSelect.addEventListener('change', () => {
+  updateCaptureModeHelp();
+});
+
 diarizationModeSelect.addEventListener('change', () => {
   if (diarizationModeSelect.value === 'tdrz_2speaker') {
     setStatus(
@@ -675,6 +805,7 @@ listen('model-download-progress', (event) => {
 
 async function boot() {
   resetTimer();
+  updateCaptureModeHelp();
   setStatus('Ready to record', 'idle');
 
   try {

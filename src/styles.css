@@ -172,6 +172,10 @@ input[type='text'] {
   color: #ffd36c;
 }
 
+.status.warning {
+  color: var(--warning);
+}
+
 .status.ready {
   color: var(--accent);
 }

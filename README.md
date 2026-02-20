@@ -9,6 +9,7 @@ Echo Scribe is a local-first desktop app for recording audio and generating tran
 - Markdown transcript output with frontmatter metadata
 - Optional CoachNotes mode (`<CoachRoot>/<Client>/<date>-transcript-<time>.md`)
 - Experimental 2-speaker mode (English only, `small.en-tdrz` + `-tdrz`)
+- Capture mode selector: microphone, system audio, or system+microphone
 
 ## Runtime Model Setup
 
@@ -80,6 +81,12 @@ npm run tauri dev
 ```
 
 In debug mode, if sidecar is unavailable, Echo Scribe attempts local fallback discovery for whisper binaries.
+
+## System Audio Capture Notes
+
+- Use `Capture Source` in the Recorder section to choose `System audio only` or `System audio + microphone`.
+- macOS will prompt you to share a screen/window when using system audio modes.
+- In that picker, choose a source with audio sharing enabled; if no audio track is shared, Echo Scribe will show an error and stop recording.
 
 ## Release / CI
 
