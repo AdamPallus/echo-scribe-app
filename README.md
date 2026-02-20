@@ -28,9 +28,18 @@ Saved transcripts are Markdown with YAML frontmatter:
 
 ```md
 ---
-title: "Session Transcript"
-date: "YYYY-MM-DD"
 client: "Client Name"
+date: "YYYY-MM-DD"
+title: "Session Transcript"
+note_type: "transcript"
+source: "coachnotes-voice-app"
+transcript: true
+speakers:
+  - "Coach"
+  - "Client"
+tags:
+  - "transcript"
+  - "coaching-session"
 source_app: "Echo Scribe"
 created_at: "ISO-8601"
 model: "base|small|medium|small.en-tdrz"

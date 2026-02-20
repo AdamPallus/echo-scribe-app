@@ -565,14 +565,32 @@ fn build_markdown_transcript(
     created_at: &str,
     date: &str,
     duration_seconds: u64,
+    coachnotes_metadata: bool,
+    diarization_applied: bool,
 ) -> String {
     let client_value = client.unwrap_or("");
+    let source_value = if coachnotes_metadata {
+        "coachnotes-voice-app"
+    } else {
+        "echo-scribe"
+    };
+    let (speaker_1, speaker_2) = if diarization_applied {
+        ("Speaker A", "Speaker B")
+    } else {
+        ("Coach", "Client")
+    };
 
     format!(
-        "---\ntitle: {}\ndate: {}\nclient: {}\nsource_app: {}\ncreated_at: {}\nmodel: {}\nlanguage: {}\ndiarization_mode: {}\nduration_seconds: {}\n---\n# Transcript\n\n{}\n",
-        yaml_quote("Session Transcript"),
-        yaml_quote(date),
+        "---\nclient: {}\ndate: {}\ntitle: {}\nnote_type: {}\nsource: {}\ntranscript: true\nspeakers:\n  - {}\n  - {}\ntags:\n  - {}\n  - {}\nsource_app: {}\ncreated_at: {}\nmodel: {}\nlanguage: {}\ndiarization_mode: {}\nduration_seconds: {}\n---\n# Transcript\n\n{}\n",
         yaml_quote(client_value),
+        yaml_quote(date),
+        yaml_quote("Session Transcript"),
+        yaml_quote("transcript"),
+        yaml_quote(source_value),
+        yaml_quote(speaker_1),
+        yaml_quote(speaker_2),
+        yaml_quote("transcript"),
+        yaml_quote("coaching-session"),
         yaml_quote("Echo Scribe"),
         yaml_quote(created_at),
         yaml_quote(model),
@@ -1019,6 +1037,7 @@ async fn transcribe_recording(
 
     let frontmatter_client = sanitize_non_empty(options.client.clone())
         .or_else(|| sanitize_non_empty(settings.coachnotes_client.clone()));
+    let coachnotes_metadata = output_mode == "coachnotes";
 
     let markdown = build_markdown_transcript(
         &transcript,
@@ -1029,6 +1048,8 @@ async fn transcribe_recording(
         &created_at,
         &created_date,
         duration_seconds,
+        coachnotes_metadata,
+        diarization_applied,
     );
 
     let saved_path = if let Some(path) = save_destination {
