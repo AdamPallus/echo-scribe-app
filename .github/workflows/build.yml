@@ -64,8 +64,12 @@ jobs:
         run: |
           set -euxo pipefail
           git clone --depth 1 --branch "$WHISPER_CPP_REF" https://github.com/ggml-org/whisper.cpp.git /tmp/whisper.cpp
-          cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build -DGGML_METAL=ON
+          cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_METAL=ON \
+            -DGGML_METAL_EMBED_LIBRARY=ON
           cmake --build /tmp/whisper.cpp/build -j
+          otool -L /tmp/whisper.cpp/build/bin/whisper-cli
           mkdir -p src-tauri/binaries
           cp /tmp/whisper.cpp/build/bin/whisper-cli src-tauri/binaries/whisper-cli-aarch64-apple-darwin
           chmod +x src-tauri/binaries/whisper-cli-aarch64-apple-darwin
