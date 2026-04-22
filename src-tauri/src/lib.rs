@@ -14,6 +14,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const COACHNOTES_DELETED_DIR: &str = "Deleted Notes";
 const SPEAKER_TURN_MARKER: &str = "[SPEAKER_TURN]";
+const SYSTEM_AUDIO_CAPTURE_PLACEHOLDER_MARKER: &str =
+    "system-audio-capture sidecar placeholder";
+const BLANK_AUDIO_MARKER: &str = "[BLANK_AUDIO]";
 
 #[derive(Debug, Clone, Copy)]
 struct ModelCatalogEntry {
@@ -71,6 +74,8 @@ struct AppSettings {
     coachnotes_root_dir: Option<String>,
     coachnotes_client: Option<String>,
     diarization_mode: String,
+    #[serde(default)]
+    diarization_mode_configured: bool,
 }
 
 impl Default for AppSettings {
@@ -82,7 +87,8 @@ impl Default for AppSettings {
             coachnotes_enabled: false,
             coachnotes_root_dir: None,
             coachnotes_client: None,
-            diarization_mode: "none".to_string(),
+            diarization_mode: "source_aware_2speaker".to_string(),
+            diarization_mode_configured: false,
         }
     }
 }
@@ -121,9 +127,17 @@ pub struct SetupState {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TranscriptionOptions {
     audio_data: Vec<u8>,
+    #[serde(default)]
+    microphone_audio_data: Vec<u8>,
+    #[serde(default)]
+    system_audio_data: Vec<u8>,
+    #[serde(default)]
+    system_audio_offset_ms: u64,
     model: String,
     language: String,
     save_markdown: bool,
+    #[serde(default)]
+    save_raw_audio: bool,
     output_mode: String,
     client: Option<String>,
     diarization_mode: String,
@@ -133,8 +147,10 @@ pub struct TranscriptionOptions {
 pub struct TranscriptionResult {
     transcript: String,
     saved_path: Option<String>,
+    saved_audio_paths: Vec<String>,
     format: String,
     diarization_applied: bool,
+    speaker_mode_used: String,
     warnings: Vec<String>,
 }
 
@@ -173,6 +189,7 @@ struct ModelDownloadPayload {
 
 struct WhisperOutput {
     success: bool,
+    stdout: Vec<u8>,
     stderr: Vec<u8>,
     used_sidecar: bool,
 }
@@ -182,9 +199,82 @@ struct SystemAudioCaptureSession {
     output_path: PathBuf,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemAudioCaptureMetadata {
+    #[serde(default)]
+    first_audio_wall_time_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct SystemAudioCaptureResult {
+    audio_data: Vec<u8>,
+    first_audio_wall_time_ms: u64,
+}
+
 #[derive(Default)]
 struct SystemAudioCaptureState {
     session: Mutex<Option<SystemAudioCaptureSession>>,
+}
+
+struct TempFileCleanup {
+    paths: Vec<PathBuf>,
+}
+
+impl TempFileCleanup {
+    fn new(paths: Vec<PathBuf>) -> Self {
+        Self { paths }
+    }
+}
+
+impl Drop for TempFileCleanup {
+    fn drop(&mut self) {
+        for path in &self.paths {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum WhisperFileFormat {
+    Txt,
+    Srt,
+}
+
+impl WhisperFileFormat {
+    fn cli_flag(self) -> &'static str {
+        match self {
+            Self::Txt => "-otxt",
+            Self::Srt => "-osrt",
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Txt => "txt",
+            Self::Srt => "srt",
+        }
+    }
+}
+
+struct WhisperTranscriptOutput {
+    content: String,
+    used_sidecar: bool,
+}
+
+#[derive(Clone)]
+struct TimestampedSegment {
+    speaker: String,
+    start_ms: u64,
+    end_ms: u64,
+    text: String,
+}
+
+#[derive(Clone)]
+struct WordSpan {
+    start: usize,
+    end: usize,
+    normalized: String,
 }
 
 fn emit_progress(app: &AppHandle, percent: u32, message: &str) {
@@ -281,9 +371,17 @@ fn validate_output_mode(mode: &str) -> &'static str {
 
 fn validate_diarization_mode(mode: &str) -> &'static str {
     match mode {
+        "source_aware_2speaker" => "source_aware_2speaker",
         "tdrz_2speaker" => "tdrz_2speaker",
         _ => "none",
     }
+}
+
+fn echo_scribe_temp_dir() -> Result<PathBuf, String> {
+    let temp_dir = std::env::temp_dir().join("echo-scribe");
+    fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temporary directory: {}", e))?;
+    Ok(temp_dir)
 }
 
 fn app_data_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -338,6 +436,9 @@ fn load_settings(app: &AppHandle) -> Result<AppSettings, String> {
     }
     settings.transcript_format = "md".to_string();
     settings.diarization_mode = validate_diarization_mode(&settings.diarization_mode).to_string();
+    if !settings.diarization_mode_configured {
+        settings.diarization_mode = AppSettings::default().diarization_mode;
+    }
     settings.coachnotes_root_dir = sanitize_non_empty(settings.coachnotes_root_dir.clone());
     settings.coachnotes_client = sanitize_non_empty(settings.coachnotes_client.clone());
 
@@ -386,7 +487,14 @@ async fn sha256_for_file(path: &Path) -> Result<String, String> {
     Ok(format!("{:x}", hasher.finalize()))
 }
 
-fn get_whisper_path() -> PathBuf {
+fn sidecar_binary_path() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let parent = exe.parent()?;
+    Some(parent.join("whisper-cli"))
+}
+
+#[cfg(debug_assertions)]
+fn debug_whisper_fallback_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_default();
 
     let local = home.join("whisper.cpp/build/bin/whisper-cli");
@@ -405,12 +513,6 @@ fn get_whisper_path() -> PathBuf {
     }
 
     PathBuf::from("whisper-cli")
-}
-
-fn sidecar_binary_path() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let parent = exe.parent()?;
-    Some(parent.join("whisper-cli"))
 }
 
 fn system_audio_capture_sidecar_candidates() -> Vec<PathBuf> {
@@ -433,18 +535,141 @@ fn system_audio_capture_sidecar_candidates() -> Vec<PathBuf> {
     candidates
 }
 
-fn resolve_system_audio_capture_sidecar_path() -> PathBuf {
-    for candidate in system_audio_capture_sidecar_candidates() {
-        if candidate.exists() {
-            return candidate;
+fn file_contains_marker(path: &Path, marker: &str) -> bool {
+    fs::read_to_string(path)
+        .map(|content| content.contains(marker))
+        .unwrap_or(false)
+}
+
+#[cfg(debug_assertions)]
+fn debug_system_audio_capture_binary_path(app: &AppHandle) -> Result<PathBuf, String> {
+    let app_dir = app_data_dir(app)?;
+    let dev_dir = app_dir.join("dev-binaries");
+    fs::create_dir_all(&dev_dir).map_err(|e| {
+        format!(
+            "Failed to create dev binary directory ({}): {}",
+            dev_dir.display(),
+            e
+        )
+    })?;
+    Ok(dev_dir.join("system-audio-capture"))
+}
+
+#[cfg(debug_assertions)]
+fn debug_system_audio_capture_source_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("native/system_audio_capture.swift")
+}
+
+#[cfg(debug_assertions)]
+fn should_rebuild_debug_binary(source_path: &Path, binary_path: &Path) -> bool {
+    if !binary_path.exists() {
+        return true;
+    }
+
+    let Ok(source_meta) = fs::metadata(source_path) else {
+        return false;
+    };
+    let Ok(binary_meta) = fs::metadata(binary_path) else {
+        return true;
+    };
+    let Ok(source_modified) = source_meta.modified() else {
+        return false;
+    };
+    let Ok(binary_modified) = binary_meta.modified() else {
+        return true;
+    };
+
+    source_modified > binary_modified
+}
+
+#[cfg(debug_assertions)]
+fn ensure_debug_system_audio_capture_binary(app: &AppHandle) -> Result<PathBuf, String> {
+    let source_path = debug_system_audio_capture_source_path();
+    if !source_path.exists() {
+        return Err(format!(
+            "System audio capture source file is missing: {}",
+            source_path.display()
+        ));
+    }
+
+    let binary_path = debug_system_audio_capture_binary_path(app)?;
+    if should_rebuild_debug_binary(&source_path, &binary_path) {
+        let output = StdCommand::new("swiftc")
+            .args([
+                "-O",
+                "-parse-as-library",
+                "-framework",
+                "AVFoundation",
+                "-framework",
+                "CoreGraphics",
+                "-framework",
+                "CoreMedia",
+                "-framework",
+                "ScreenCaptureKit",
+            ])
+            .arg(&source_path)
+            .arg("-o")
+            .arg(&binary_path)
+            .output()
+            .map_err(|e| format!("Failed to launch swiftc for system audio helper: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Failed to build local system audio capture helper: {}",
+                process_output_detail(&output.stdout, &output.stderr)
+            ));
         }
     }
 
-    PathBuf::from("system-audio-capture")
+    Ok(binary_path)
+}
+
+fn resolve_system_audio_capture_sidecar_path(_app_handle: &AppHandle) -> Result<PathBuf, String> {
+    for candidate in system_audio_capture_sidecar_candidates() {
+        if candidate.exists() {
+            if file_contains_marker(&candidate, SYSTEM_AUDIO_CAPTURE_PLACEHOLDER_MARKER) {
+                #[cfg(debug_assertions)]
+                {
+                    return ensure_debug_system_audio_capture_binary(_app_handle);
+                }
+
+                #[cfg(not(debug_assertions))]
+                {
+                    continue;
+                }
+            }
+
+            return Ok(candidate);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        return ensure_debug_system_audio_capture_binary(_app_handle);
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        Ok(PathBuf::from("system-audio-capture"))
+    }
 }
 
 fn is_sidecar_available() -> bool {
     sidecar_binary_path().map(|p| p.exists()).unwrap_or(false)
+}
+
+fn process_output_detail(stdout: &[u8], stderr: &[u8]) -> String {
+    let stderr_text = String::from_utf8_lossy(stderr).trim().to_string();
+    if !stderr_text.is_empty() {
+        return stderr_text;
+    }
+
+    let stdout_text = String::from_utf8_lossy(stdout).trim().to_string();
+    if !stdout_text.is_empty() {
+        return stdout_text;
+    }
+
+    "process exited without output".to_string()
 }
 
 fn list_coachnotes_clients_from_root(root_dir: &Path) -> Result<Vec<String>, String> {
@@ -496,6 +721,7 @@ async fn run_whisper(app: &AppHandle, args: &[String]) -> Result<WhisperOutput, 
 
         return Ok(WhisperOutput {
             success: output.status.success(),
+            stdout: output.stdout,
             stderr: output.stderr,
             used_sidecar: true,
         });
@@ -503,17 +729,32 @@ async fn run_whisper(app: &AppHandle, args: &[String]) -> Result<WhisperOutput, 
 
     #[cfg(debug_assertions)]
     {
+        let mut sidecar_failure: Option<String> = None;
+
         if let Ok(command) = app.shell().sidecar("whisper-cli") {
-            if let Ok(output) = command.args(args).output().await {
-                return Ok(WhisperOutput {
-                    success: output.status.success(),
-                    stderr: output.stderr,
-                    used_sidecar: true,
-                });
+            match command.args(args).output().await {
+                Ok(output) => {
+                    if output.status.success() {
+                        return Ok(WhisperOutput {
+                            success: true,
+                            stdout: output.stdout,
+                            stderr: output.stderr,
+                            used_sidecar: true,
+                        });
+                    }
+
+                    sidecar_failure = Some(format!(
+                        "Debug sidecar failed: {}",
+                        process_output_detail(&output.stdout, &output.stderr)
+                    ));
+                }
+                Err(error) => {
+                    sidecar_failure = Some(format!("Debug sidecar could not run: {}", error));
+                }
             }
         }
 
-        let whisper_path = get_whisper_path();
+        let whisper_path = debug_whisper_fallback_path();
         let fallback = StdCommand::new(&whisper_path)
             .args(args)
             .output()
@@ -525,12 +766,534 @@ async fn run_whisper(app: &AppHandle, args: &[String]) -> Result<WhisperOutput, 
                 )
             })?;
 
+        if fallback.status.success() {
+            return Ok(WhisperOutput {
+                success: true,
+                stdout: fallback.stdout,
+                stderr: fallback.stderr,
+                used_sidecar: false,
+            });
+        }
+
+        let mut detail = format!(
+            "Whisper fallback failed ({}): {}",
+            whisper_path.display(),
+            process_output_detail(&fallback.stdout, &fallback.stderr)
+        );
+        if let Some(sidecar_failure) = sidecar_failure {
+            detail = format!("{} | {}", sidecar_failure, detail);
+        }
+
         Ok(WhisperOutput {
-            success: fallback.status.success(),
-            stderr: fallback.stderr,
+            success: false,
+            stdout: detail.into_bytes(),
+            stderr: Vec::new(),
             used_sidecar: false,
         })
     }
+}
+
+async fn transcribe_with_temp_output(
+    app: &AppHandle,
+    model_path: &Path,
+    wav_data: &[u8],
+    language: &str,
+    diarization_mode: &str,
+    format: WhisperFileFormat,
+    stem: &str,
+) -> Result<WhisperTranscriptOutput, String> {
+    let temp_dir = echo_scribe_temp_dir()?;
+    let wav_path = temp_dir.join(format!("{}.wav", stem));
+    let output_base = temp_dir.join(stem);
+    let transcript_path = temp_dir.join(format!("{}.{}", stem, format.extension()));
+    let _cleanup = TempFileCleanup::new(vec![wav_path.clone(), transcript_path.clone()]);
+
+    fs::write(&wav_path, wav_data).map_err(|e| {
+        format!(
+            "Failed to write temporary audio file ({}): {}",
+            wav_path.display(),
+            e
+        )
+    })?;
+
+    let mut whisper_args = vec![
+        "-m".to_string(),
+        model_path.to_string_lossy().to_string(),
+        "-f".to_string(),
+        wav_path.to_string_lossy().to_string(),
+        format.cli_flag().to_string(),
+        "-of".to_string(),
+        output_base.to_string_lossy().to_string(),
+    ];
+
+    if language != "auto" {
+        whisper_args.push("-l".to_string());
+        whisper_args.push(language.to_string());
+    }
+
+    if diarization_mode == "tdrz_2speaker" {
+        whisper_args.push("-tdrz".to_string());
+    }
+
+    let whisper_output = run_whisper(app, &whisper_args).await?;
+    if !whisper_output.success {
+        return Err(format!(
+            "Whisper failed: {}",
+            process_output_detail(&whisper_output.stdout, &whisper_output.stderr)
+        ));
+    }
+
+    let content = fs::read_to_string(&transcript_path).map_err(|e| {
+        format!(
+            "Whisper ran but transcript file could not be read ({}): {}",
+            transcript_path.display(),
+            e
+        )
+    })?;
+
+    Ok(WhisperTranscriptOutput {
+        content,
+        used_sidecar: whisper_output.used_sidecar,
+    })
+}
+
+fn parse_srt_timestamp(raw: &str) -> Option<u64> {
+    let cleaned = raw.trim().replace(',', ".");
+    let parts = cleaned.split(':').collect::<Vec<&str>>();
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let hours = parts[0].parse::<u64>().ok()?;
+    let minutes = parts[1].parse::<u64>().ok()?;
+    let sec_parts = parts[2].split('.').collect::<Vec<&str>>();
+    if sec_parts.len() != 2 {
+        return None;
+    }
+
+    let seconds = sec_parts[0].parse::<u64>().ok()?;
+    let millis = match sec_parts[1].len() {
+        0 => 0,
+        1 => sec_parts[1].parse::<u64>().ok()? * 100,
+        2 => sec_parts[1].parse::<u64>().ok()? * 10,
+        _ => sec_parts[1].chars().take(3).collect::<String>().parse::<u64>().ok()?,
+    };
+
+    Some((((hours * 60) + minutes) * 60 + seconds) * 1000 + millis)
+}
+
+fn parse_srt_segments(text: &str, speaker: &str) -> Vec<TimestampedSegment> {
+    let normalized = text.replace("\r\n", "\n");
+    let mut segments = Vec::new();
+
+    for block in normalized.split("\n\n") {
+        let lines = block
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+            .collect::<Vec<&str>>();
+
+        if lines.len() < 2 {
+            continue;
+        }
+
+        let time_index = if lines[0].chars().all(|char| char.is_ascii_digit()) {
+            1
+        } else {
+            0
+        };
+
+        if lines.len() <= time_index {
+            continue;
+        }
+
+        let Some((start_raw, end_raw)) = lines[time_index].split_once("-->") else {
+            continue;
+        };
+
+        let Some(start_ms) = parse_srt_timestamp(start_raw) else {
+            continue;
+        };
+        let Some(end_ms) = parse_srt_timestamp(end_raw) else {
+            continue;
+        };
+
+        let body = sanitize_transcript_text(
+            &lines
+            .iter()
+            .skip(time_index + 1)
+            .copied()
+            .collect::<Vec<&str>>()
+            .join(" ")
+            .trim()
+            .to_string(),
+        );
+
+        if body.is_empty() {
+            continue;
+        }
+
+        segments.push(TimestampedSegment {
+            speaker: speaker.to_string(),
+            start_ms,
+            end_ms,
+            text: body,
+        });
+    }
+
+    if segments.is_empty() {
+        let fallback = normalize_transcript(text);
+        if !fallback.is_empty() {
+            segments.push(TimestampedSegment {
+                speaker: speaker.to_string(),
+                start_ms: 0,
+                end_ms: 0,
+                text: fallback,
+            });
+        }
+    }
+
+    segments
+}
+
+fn coalesce_channel_segments(
+    segments: Vec<TimestampedSegment>,
+    max_gap_ms: u64,
+) -> Vec<TimestampedSegment> {
+    let mut merged: Vec<TimestampedSegment> = Vec::new();
+
+    for segment in segments {
+        if let Some(last) = merged.last_mut() {
+            if last.speaker == segment.speaker
+                && segment.start_ms >= last.start_ms
+                && segment.start_ms.saturating_sub(last.end_ms) <= max_gap_ms
+            {
+                last.end_ms = last.end_ms.max(segment.end_ms);
+                last.text = format!("{} {}", last.text, segment.text).trim().to_string();
+                continue;
+            }
+        }
+
+        merged.push(segment);
+    }
+
+    merged
+}
+
+fn shift_segments(segments: &mut [TimestampedSegment], offset_ms: u64) {
+    if offset_ms == 0 {
+        return;
+    }
+
+    for segment in segments {
+        segment.start_ms = segment.start_ms.saturating_add(offset_ms);
+        segment.end_ms = segment.end_ms.saturating_add(offset_ms);
+    }
+}
+
+fn extract_word_spans(text: &str) -> Vec<WordSpan> {
+    let mut spans = Vec::new();
+    let mut token_start: Option<usize> = None;
+
+    for (index, ch) in text.char_indices() {
+        let is_word = ch.is_ascii_alphanumeric() || ch == '\'';
+        match (token_start, is_word) {
+            (None, true) => token_start = Some(index),
+            (Some(start), false) => {
+                let token = &text[start..index];
+                let normalized = token
+                    .chars()
+                    .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '\'')
+                    .collect::<String>()
+                    .to_ascii_lowercase();
+
+                if !normalized.is_empty() {
+                    spans.push(WordSpan {
+                        start,
+                        end: index,
+                        normalized,
+                    });
+                }
+                token_start = None;
+            }
+            _ => {}
+        }
+    }
+
+    if let Some(start) = token_start {
+        let token = &text[start..];
+        let normalized = token
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric() || *ch == '\'')
+            .collect::<String>()
+            .to_ascii_lowercase();
+
+        if !normalized.is_empty() {
+            spans.push(WordSpan {
+                start,
+                end: text.len(),
+                normalized,
+            });
+        }
+    }
+
+    spans
+}
+
+fn collect_word_tokens(text: &str) -> Vec<String> {
+    extract_word_spans(text)
+        .into_iter()
+        .map(|span| span.normalized)
+        .collect()
+}
+
+fn collapse_spacing(text: &str) -> String {
+    let mut output = String::new();
+    let mut previous_was_space = false;
+
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            if !previous_was_space {
+                output.push(' ');
+                previous_was_space = true;
+            }
+            continue;
+        }
+
+        if matches!(ch, '.' | ',' | '!' | '?' | ';' | ':') && output.ends_with(' ') {
+            output.pop();
+        }
+
+        output.push(ch);
+        previous_was_space = false;
+    }
+
+    output.trim().to_string()
+}
+
+fn longest_duplicate_range(
+    spans: &[WordSpan],
+    reference_tokens: &[String],
+    min_match_tokens: usize,
+) -> Option<(usize, usize)> {
+    let mut best_range: Option<(usize, usize)> = None;
+    let mut best_len = 0usize;
+
+    for start_index in 0..spans.len() {
+        for reference_start in 0..reference_tokens.len() {
+            if spans[start_index].normalized != reference_tokens[reference_start] {
+                continue;
+            }
+
+            let mut match_len = 0usize;
+            while start_index + match_len < spans.len()
+                && reference_start + match_len < reference_tokens.len()
+                && spans[start_index + match_len].normalized
+                    == reference_tokens[reference_start + match_len]
+            {
+                match_len += 1;
+            }
+
+            if match_len >= min_match_tokens && match_len > best_len {
+                best_len = match_len;
+                let start_byte = spans[start_index].start;
+                let end_byte = spans[start_index + match_len - 1].end;
+                best_range = Some((start_byte, end_byte));
+            }
+        }
+    }
+
+    best_range
+}
+
+fn segments_overlap_with_margin(
+    left_start: u64,
+    left_end: u64,
+    right_start: u64,
+    right_end: u64,
+    margin_ms: u64,
+) -> bool {
+    let left_start = left_start.saturating_sub(margin_ms);
+    let left_end = left_end.saturating_add(margin_ms);
+    let right_start = right_start.saturating_sub(margin_ms);
+    let right_end = right_end.saturating_add(margin_ms);
+
+    left_start <= right_end && right_start <= left_end
+}
+
+fn strip_reference_leakage_from_segment(
+    text: &str,
+    reference_segments: &[TimestampedSegment],
+    start_ms: u64,
+    end_ms: u64,
+) -> String {
+    let overlapping_reference = reference_segments
+        .iter()
+        .filter(|segment| {
+            segments_overlap_with_margin(start_ms, end_ms, segment.start_ms, segment.end_ms, 1200)
+        })
+        .map(|segment| segment.text.as_str())
+        .collect::<Vec<&str>>();
+
+    if overlapping_reference.is_empty() {
+        return text.trim().to_string();
+    }
+
+    let reference_tokens = collect_word_tokens(&overlapping_reference.join(" "));
+    if reference_tokens.len() < 4 {
+        return text.trim().to_string();
+    }
+
+    let mut cleaned = text.trim().to_string();
+    loop {
+        let spans = extract_word_spans(&cleaned);
+        if spans.len() < 4 {
+            break;
+        }
+
+        let Some((start_byte, end_byte)) = longest_duplicate_range(&spans, &reference_tokens, 4)
+        else {
+            break;
+        };
+
+        cleaned.replace_range(start_byte..end_byte, " ");
+        cleaned = collapse_spacing(&cleaned);
+    }
+
+    cleaned
+}
+
+fn merge_source_segments(
+    microphone_segments: Vec<TimestampedSegment>,
+    system_segments: Vec<TimestampedSegment>,
+) -> String {
+    let mut segments = Vec::new();
+
+    for mut segment in microphone_segments {
+        let cleaned = strip_reference_leakage_from_segment(
+            &segment.text,
+            &system_segments,
+            segment.start_ms,
+            segment.end_ms,
+        );
+
+        if extract_word_spans(&cleaned).is_empty() {
+            continue;
+        }
+
+        segment.text = cleaned;
+        segments.push(segment);
+    }
+
+    segments.extend(system_segments);
+    segments.sort_by(|left, right| {
+        left.start_ms
+            .cmp(&right.start_ms)
+            .then_with(|| left.end_ms.cmp(&right.end_ms))
+            .then_with(|| left.speaker.cmp(&right.speaker))
+    });
+
+    let mut merged: Vec<TimestampedSegment> = Vec::new();
+    for segment in segments {
+        if let Some(last) = merged.last_mut() {
+            let same_speaker = last.speaker == segment.speaker;
+            let gap_ms = segment.start_ms.saturating_sub(last.end_ms);
+            if same_speaker && gap_ms <= 500 {
+                last.end_ms = last.end_ms.max(segment.end_ms);
+                last.text = format!("{} {}", last.text, segment.text).trim().to_string();
+                continue;
+            }
+        }
+
+        merged.push(segment);
+    }
+
+    merged
+        .into_iter()
+        .map(|segment| format!("{}: {}", segment.speaker, segment.text))
+        .collect::<Vec<String>>()
+        .join("\n\n")
+}
+
+fn sanitize_filename_component(value: &str) -> String {
+    let sanitized = value
+        .trim()
+        .chars()
+        .map(|char| {
+            if char.is_ascii_alphanumeric() {
+                char.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+
+    sanitized
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<&str>>()
+        .join("-")
+}
+
+fn save_raw_audio_copies(
+    settings: &AppSettings,
+    base_name: &str,
+    coachnotes_client: Option<&str>,
+    primary_audio: &[u8],
+    microphone_audio: &[u8],
+    system_audio: &[u8],
+) -> Result<Vec<String>, String> {
+    let audio_dir = resolve_transcript_dir(settings);
+    fs::create_dir_all(&audio_dir).map_err(|e| {
+        format!(
+            "Failed to create transcript directory ({}): {}",
+            audio_dir.display(),
+            e
+        )
+    })?;
+
+    let client_suffix = coachnotes_client
+        .map(sanitize_filename_component)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("-{}", value))
+        .unwrap_or_default();
+
+    let stem = format!("{}{}", base_name, client_suffix);
+    let mut saved_paths = Vec::new();
+
+    let primary_path = audio_dir.join(format!("{}-recording.wav", stem));
+    fs::write(&primary_path, primary_audio).map_err(|e| {
+        format!(
+            "Failed to write raw audio file ({}): {}",
+            primary_path.display(),
+            e
+        )
+    })?;
+    saved_paths.push(primary_path.to_string_lossy().to_string());
+
+    if !microphone_audio.is_empty() && !system_audio.is_empty() {
+        let microphone_path = audio_dir.join(format!("{}-coach-mic.wav", stem));
+        fs::write(&microphone_path, microphone_audio).map_err(|e| {
+            format!(
+                "Failed to write microphone audio file ({}): {}",
+                microphone_path.display(),
+                e
+            )
+        })?;
+        saved_paths.push(microphone_path.to_string_lossy().to_string());
+
+        let system_path = audio_dir.join(format!("{}-client-system.wav", stem));
+        fs::write(&system_path, system_audio).map_err(|e| {
+            format!(
+                "Failed to write system audio file ({}): {}",
+                system_path.display(),
+                e
+            )
+        })?;
+        saved_paths.push(system_path.to_string_lossy().to_string());
+    }
+
+    Ok(saved_paths)
 }
 
 fn estimate_duration_seconds(wav_data: &[u8]) -> u64 {
@@ -554,10 +1317,21 @@ fn yaml_quote(value: &str) -> String {
 }
 
 fn normalize_transcript(text: &str) -> String {
-    text.lines()
+    sanitize_transcript_text(
+        &text.lines()
         .map(str::trim)
         .collect::<Vec<&str>>()
         .join("\n")
+        .trim()
+        .to_string(),
+    )
+}
+
+fn sanitize_transcript_text(text: &str) -> String {
+    text.replace(BLANK_AUDIO_MARKER, "")
+        .split_whitespace()
+        .collect::<Vec<&str>>()
+        .join(" ")
         .trim()
         .to_string()
 }
@@ -608,16 +1382,12 @@ fn build_markdown_transcript(
     date: &str,
     duration_seconds: u64,
     coachnotes_metadata: bool,
-    diarization_applied: bool,
+    speaker_labels: Option<(&str, &str)>,
 ) -> String {
     let client_value = coachnotes_client.unwrap_or("");
 
     if coachnotes_metadata {
-        let (speaker_1, speaker_2) = if diarization_applied {
-            ("Speaker A", "Speaker B")
-        } else {
-            ("Coach", "Client")
-        };
+        let (speaker_1, speaker_2) = speaker_labels.unwrap_or(("Coach", "Client"));
 
         return format!(
             "---\nclient: {}\ndate: {}\ntitle: {}\nnote_type: {}\nsource: {}\ntranscript: true\nspeakers:\n  - {}\n  - {}\ntags:\n  - {}\n  - {}\nsource_app: {}\ncreated_at: {}\nmodel: {}\nlanguage: {}\ndiarization_mode: {}\nduration_seconds: {}\n---\n# Transcript\n\n{}\n",
@@ -746,6 +1516,16 @@ async fn set_transcript_directory(app: AppHandle, directory: String) -> Result<S
 
     let mut settings = load_settings(&app)?;
     settings.transcript_dir = Some(directory_path.to_string_lossy().to_string());
+    save_settings(&app, &settings)?;
+
+    build_setup_state(&app)
+}
+
+#[tauri::command]
+async fn set_diarization_mode(app: AppHandle, mode: String) -> Result<SetupState, String> {
+    let mut settings = load_settings(&app)?;
+    settings.diarization_mode = validate_diarization_mode(&mode).to_string();
+    settings.diarization_mode_configured = true;
     save_settings(&app, &settings)?;
 
     build_setup_state(&app)
@@ -912,6 +1692,7 @@ async fn download_model(
 
 #[tauri::command]
 async fn start_system_audio_recording(
+    app: AppHandle,
     state: State<'_, SystemAudioCaptureState>,
 ) -> Result<(), String> {
     #[cfg(not(target_os = "macos"))]
@@ -937,14 +1718,14 @@ async fn start_system_audio_recording(
             .map_err(|e| format!("Failed to create temporary directory: {}", e))?;
         let output_path = temp_dir.join(format!("system-audio-{}.wav", timestamp));
 
-        let sidecar_path = resolve_system_audio_capture_sidecar_path();
+        let sidecar_path = resolve_system_audio_capture_sidecar_path(&app)?;
         let mut command = StdCommand::new(&sidecar_path);
         command
             .arg("record")
             .arg("--output")
             .arg(&output_path)
             .stdin(Stdio::piped())
-            .stdout(Stdio::null())
+            .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
         let child = command.spawn().map_err(|e| {
@@ -963,7 +1744,7 @@ async fn start_system_audio_recording(
 #[tauri::command]
 async fn stop_system_audio_recording(
     state: State<'_, SystemAudioCaptureState>,
-) -> Result<Vec<u8>, String> {
+) -> Result<SystemAudioCaptureResult, String> {
     #[cfg(not(target_os = "macos"))]
     {
         let _ = state;
@@ -982,6 +1763,7 @@ async fn stop_system_audio_recording(
                 .take()
                 .ok_or_else(|| "System audio capture is not currently running.".to_string())?
         };
+        let _cleanup = TempFileCleanup::new(vec![session.output_path.clone()]);
 
         let _ = session.child.stdin.take();
 
@@ -1006,6 +1788,11 @@ async fn stop_system_audio_recording(
             std::thread::sleep(Duration::from_millis(50));
         };
 
+        let mut stdout = Vec::new();
+        if let Some(mut stdout_reader) = session.child.stdout.take() {
+            let _ = stdout_reader.read_to_end(&mut stdout);
+        }
+
         let mut stderr = Vec::new();
         if let Some(mut stderr_reader) = session.child.stderr.take() {
             let _ = stderr_reader.read_to_end(&mut stderr);
@@ -1013,7 +1800,6 @@ async fn stop_system_audio_recording(
 
         if !status.success() {
             let stderr_text = String::from_utf8_lossy(&stderr).trim().to_string();
-            let _ = fs::remove_file(&session.output_path);
             if stderr_text.is_empty() {
                 return Err("System audio capture exited with an error.".to_string());
             }
@@ -1028,8 +1814,6 @@ async fn stop_system_audio_recording(
             )
         })?;
 
-        let _ = fs::remove_file(&session.output_path);
-
         if wav_data.len() <= 44 {
             return Err(
                 "No shared audio was captured. Start playback first, then record again."
@@ -1037,7 +1821,23 @@ async fn stop_system_audio_recording(
             );
         }
 
-        Ok(wav_data)
+        let metadata = if stdout.is_empty() {
+            SystemAudioCaptureMetadata {
+                first_audio_wall_time_ms: 0,
+            }
+        } else {
+            serde_json::from_slice::<SystemAudioCaptureMetadata>(&stdout).map_err(|error| {
+                format!(
+                    "System audio capture returned invalid metadata: {}",
+                    error
+                )
+            })?
+        };
+
+        Ok(SystemAudioCaptureResult {
+            audio_data: wav_data,
+            first_audio_wall_time_ms: metadata.first_audio_wall_time_ms,
+        })
     }
 }
 
@@ -1046,9 +1846,15 @@ async fn transcribe_recording(
     app: AppHandle,
     options: TranscriptionOptions,
 ) -> Result<TranscriptionResult, String> {
-    if options.audio_data.is_empty() {
+    let primary_audio = if !options.audio_data.is_empty() {
+        options.audio_data.as_slice()
+    } else if !options.system_audio_data.is_empty() {
+        options.system_audio_data.as_slice()
+    } else if !options.microphone_audio_data.is_empty() {
+        options.microphone_audio_data.as_slice()
+    } else {
         return Err("No audio data provided. Record audio first.".to_string());
-    }
+    };
 
     validate_model(&options.model)?;
     let model_path = model_file_path(&app, &options.model)?;
@@ -1061,118 +1867,161 @@ async fn transcribe_recording(
     }
 
     let mut warnings = Vec::new();
+    let settings = load_settings(&app)?;
+    let mut speaker_mode_used = if options.diarization_mode.trim().is_empty() {
+        validate_diarization_mode(&settings.diarization_mode).to_string()
+    } else {
+        validate_diarization_mode(&options.diarization_mode).to_string()
+    };
 
-    let mut diarization_mode = validate_diarization_mode(&options.diarization_mode).to_string();
-    if diarization_mode == "none" {
-        let settings = load_settings(&app)?;
-        diarization_mode = validate_diarization_mode(&settings.diarization_mode).to_string();
+    let has_dual_source_audio =
+        !options.microphone_audio_data.is_empty() && !options.system_audio_data.is_empty();
+
+    if speaker_mode_used == "source_aware_2speaker" && !has_dual_source_audio {
+        warnings.push(
+            "Two-speaker source-aware mode requires both microphone and system audio capture. Falling back to standard transcription."
+                .to_string(),
+        );
+        speaker_mode_used = "none".to_string();
     }
 
-    if diarization_mode == "tdrz_2speaker" {
+    if speaker_mode_used == "tdrz_2speaker" {
         if options.language != "en" {
             warnings.push(
-                "2-speaker mode is English-only. Falling back to standard transcription."
+                "Whisper diarization fallback is English-only. Falling back to standard transcription."
                     .to_string(),
             );
-            diarization_mode = "none".to_string();
+            speaker_mode_used = "none".to_string();
         } else if options.model != "small.en-tdrz" {
             warnings.push(
-                "2-speaker mode requires the small.en-tdrz model. Falling back to standard transcription."
+                "Whisper diarization fallback requires the small.en-tdrz model. Falling back to standard transcription."
                     .to_string(),
             );
-            diarization_mode = "none".to_string();
+            speaker_mode_used = "none".to_string();
         }
     }
 
     let timestamp = unix_timestamp_secs()?;
-    let temp_dir = std::env::temp_dir().join("echo-scribe");
-    fs::create_dir_all(&temp_dir)
-        .map_err(|e| format!("Failed to create temporary directory: {}", e))?;
+    let mut diarization_applied = false;
+    let transcript = if speaker_mode_used == "source_aware_2speaker" {
+        emit_progress(&app, 5, "Preparing separate speaker channels...");
 
-    let wav_path = temp_dir.join(format!("recording-{}.wav", timestamp));
-    let output_base = temp_dir.join(format!("recording-{}", timestamp));
-    let txt_temp_path = temp_dir.join(format!("recording-{}.txt", timestamp));
-
-    emit_progress(&app, 5, "Preparing recording...");
-    fs::write(&wav_path, &options.audio_data)
-        .map_err(|e| format!("Failed to write temporary audio file: {}", e))?;
-
-    emit_progress(
-        &app,
-        20,
-        &format!("Transcribing with {} model...", options.model),
-    );
-
-    let mut whisper_args = vec![
-        "-m".to_string(),
-        model_path.to_string_lossy().to_string(),
-        "-f".to_string(),
-        wav_path.to_string_lossy().to_string(),
-        "-otxt".to_string(),
-        "-of".to_string(),
-        output_base.to_string_lossy().to_string(),
-    ];
-
-    if options.language != "auto" {
-        whisper_args.push("-l".to_string());
-        whisper_args.push(options.language.clone());
-    }
-
-    if diarization_mode == "tdrz_2speaker" {
-        whisper_args.push("-tdrz".to_string());
-    }
-
-    let whisper_output = run_whisper(&app, &whisper_args).await?;
-    if !whisper_output.used_sidecar {
-        warnings.push(
-            "Using local whisper binary fallback in debug mode. Release builds use sidecar."
-                .to_string(),
-        );
-    }
-
-    if !whisper_output.success {
-        return Err(format!(
-            "Whisper failed: {}",
-            String::from_utf8_lossy(&whisper_output.stderr)
-        ));
-    }
-
-    emit_progress(&app, 85, "Reading transcript...");
-
-    let transcript_raw = fs::read_to_string(&txt_temp_path).map_err(|e| {
-        format!(
-            "Whisper ran but transcript file could not be read ({}): {}",
-            txt_temp_path.display(),
-            e
+        let microphone_output = transcribe_with_temp_output(
+            &app,
+            &model_path,
+            &options.microphone_audio_data,
+            &options.language,
+            "none",
+            WhisperFileFormat::Srt,
+            &format!("recording-{}-coach-mic", timestamp),
         )
-    })?;
+        .await?;
 
-    let (transcript, diarization_applied) = if diarization_mode == "tdrz_2speaker" {
-        let (formatted, applied) = apply_tdrz_speaker_labels(&transcript_raw);
-        if !applied {
+        emit_progress(&app, 50, "Transcribing client system audio...");
+
+        let system_output = transcribe_with_temp_output(
+            &app,
+            &model_path,
+            &options.system_audio_data,
+            &options.language,
+            "none",
+            WhisperFileFormat::Srt,
+            &format!("recording-{}-client-system", timestamp),
+        )
+        .await?;
+
+        if !microphone_output.used_sidecar || !system_output.used_sidecar {
             warnings.push(
-                "2-speaker mode did not produce speaker boundaries because whisper.cpp returned no [SPEAKER_TURN] markers. Output is unsegmented. This is common when voices are too similar/overlapped or only one voice is dominant; try clearer turn-taking, louder remote audio, or retry with cleaner input."
+                "Using local whisper binary fallback in debug mode. Release builds use sidecar."
                     .to_string(),
             );
         }
-        (formatted, applied)
+
+        let microphone_segments = parse_srt_segments(&microphone_output.content, "Coach");
+        let mut system_segments =
+            coalesce_channel_segments(parse_srt_segments(&system_output.content, "Client"), 750);
+        shift_segments(&mut system_segments, options.system_audio_offset_ms);
+
+        if microphone_segments.is_empty() {
+            warnings.push(
+                "Microphone channel did not produce timestamped transcript segments.".to_string(),
+            );
+        }
+        if system_segments.is_empty() {
+            warnings.push(
+                "System audio channel did not produce timestamped transcript segments."
+                    .to_string(),
+            );
+        }
+
+        emit_progress(&app, 85, "Merging separate speaker transcripts...");
+        diarization_applied = true;
+        merge_source_segments(microphone_segments, system_segments)
     } else {
-        (normalize_transcript(&transcript_raw), false)
+        emit_progress(
+            &app,
+            5,
+            if speaker_mode_used == "tdrz_2speaker" {
+                "Preparing diarization fallback..."
+            } else {
+                "Preparing recording..."
+            },
+        );
+
+        let transcript_output = transcribe_with_temp_output(
+            &app,
+            &model_path,
+            primary_audio,
+            &options.language,
+            &speaker_mode_used,
+            WhisperFileFormat::Txt,
+            &format!("recording-{}", timestamp),
+        )
+        .await?;
+
+        if !transcript_output.used_sidecar {
+            warnings.push(
+                "Using local whisper binary fallback in debug mode. Release builds use sidecar."
+                    .to_string(),
+            );
+        }
+
+        emit_progress(&app, 85, "Reading transcript...");
+
+        if speaker_mode_used == "tdrz_2speaker" {
+            let (formatted, applied) = apply_tdrz_speaker_labels(&transcript_output.content);
+            if !applied {
+                warnings.push(
+                    "Whisper diarization fallback did not produce speaker boundaries because whisper.cpp returned no [SPEAKER_TURN] markers. Output is unsegmented. This is common when voices are too similar/overlapped or only one voice is dominant; try clearer turn-taking, louder remote audio, or use source-aware mode with separate system + microphone capture."
+                        .to_string(),
+                );
+            }
+            diarization_applied = applied;
+            formatted
+        } else {
+            normalize_transcript(&transcript_output.content)
+        }
     };
 
     if transcript.is_empty() {
         return Err("Whisper returned an empty transcript.".to_string());
     }
 
-    let settings = load_settings(&app)?;
     let output_mode = validate_output_mode(&options.output_mode);
     let mut save_destination: Option<PathBuf> = None;
+    let now = now_local_or_utc();
+    let date = format_date(now);
+    let time_compact = format_time_compact(now);
+    let created_at = format_iso8601(now);
+    let coachnotes_metadata = output_mode == "coachnotes" && settings.coachnotes_enabled;
+    let frontmatter_client = if coachnotes_metadata {
+        sanitize_non_empty(options.client.clone())
+            .or_else(|| sanitize_non_empty(settings.coachnotes_client.clone()))
+    } else {
+        None
+    };
 
     if options.save_markdown {
-        let now = now_local_or_utc();
-        let date = format_date(now);
-        let time_compact = format_time_compact(now);
-
         if output_mode == "coachnotes" && settings.coachnotes_enabled {
             let root = sanitize_non_empty(settings.coachnotes_root_dir.clone());
             let selected_client = sanitize_non_empty(options.client.clone())
@@ -1214,30 +2063,32 @@ async fn transcribe_recording(
         }
     }
 
-    let duration_seconds = estimate_duration_seconds(&options.audio_data);
-    let now = now_local_or_utc();
-    let created_at = format_iso8601(now);
-    let created_date = format_date(now);
-
-    let coachnotes_metadata = output_mode == "coachnotes" && settings.coachnotes_enabled;
-    let frontmatter_client = if coachnotes_metadata {
-        sanitize_non_empty(options.client.clone())
-            .or_else(|| sanitize_non_empty(settings.coachnotes_client.clone()))
-    } else {
-        None
-    };
+    let duration_seconds = [
+        estimate_duration_seconds(primary_audio),
+        estimate_duration_seconds(&options.microphone_audio_data),
+        estimate_duration_seconds(&options.system_audio_data),
+    ]
+    .into_iter()
+    .max()
+    .unwrap_or(0);
 
     let markdown = build_markdown_transcript(
         &transcript,
         frontmatter_client.as_deref(),
         &options.model,
         &options.language,
-        &diarization_mode,
+        &speaker_mode_used,
         &created_at,
-        &created_date,
+        &date,
         duration_seconds,
         coachnotes_metadata,
-        diarization_applied,
+        if speaker_mode_used == "source_aware_2speaker" {
+            Some(("Coach", "Client"))
+        } else if speaker_mode_used == "tdrz_2speaker" && diarization_applied {
+            Some(("Speaker A", "Speaker B"))
+        } else {
+            Some(("Coach", "Client"))
+        },
     );
 
     let saved_path = if let Some(path) = save_destination {
@@ -1254,16 +2105,28 @@ async fn transcribe_recording(
         None
     };
 
-    let _ = fs::remove_file(&wav_path);
-    let _ = fs::remove_file(&txt_temp_path);
+    let saved_audio_paths = if options.save_raw_audio {
+        save_raw_audio_copies(
+            &settings,
+            &format!("{}-transcript-{}", date, time_compact),
+            frontmatter_client.as_deref(),
+            primary_audio,
+            &options.microphone_audio_data,
+            &options.system_audio_data,
+        )?
+    } else {
+        Vec::new()
+    };
 
     emit_progress(&app, 100, "Transcription complete!");
 
     Ok(TranscriptionResult {
         transcript,
         saved_path,
+        saved_audio_paths,
         format: "md".to_string(),
         diarization_applied,
+        speaker_mode_used,
         warnings,
     })
 }
@@ -1309,6 +2172,7 @@ pub fn run() {
             get_setup_state,
             set_selected_model,
             set_transcript_directory,
+            set_diarization_mode,
             get_coachnotes_clients,
             set_coachnotes_settings,
             download_model,

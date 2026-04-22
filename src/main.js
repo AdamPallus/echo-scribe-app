@@ -6,6 +6,7 @@ const modelSelect = document.getElementById('model-select');
 const languageSelect = document.getElementById('language-select');
 const diarizationModeSelect = document.getElementById('diarization-mode-select');
 const saveMarkdownCheckbox = document.getElementById('save-markdown');
+const saveRawAudioCheckbox = document.getElementById('save-raw-audio');
 const setupDetails = document.getElementById('setup-details');
 
 const setupPill = document.getElementById('setup-pill');
@@ -61,9 +62,26 @@ let microphoneCaptureActive = false;
 let audioChunks = [];
 let totalSamples = 0;
 let sampleRate = 44100;
-let recordedWav = null;
+let recordedCapture = null;
 let savedTranscriptPath = null;
+let savedAudioPaths = [];
 let hasTranscriptionResult = false;
+let recordingStartWallTimeMs = 0;
+
+function hasRecordedAudio() {
+  return Boolean(
+    recordedCapture
+    && (
+      recordedCapture.primaryWav
+      || recordedCapture.microphoneWav
+      || recordedCapture.systemWav
+    )
+  );
+}
+
+function currentPrimaryWav() {
+  return recordedCapture?.primaryWav || null;
+}
 
 function setStatus(message, state = 'idle') {
   statusEl.textContent = message;
@@ -146,13 +164,15 @@ async function applyModelSelection(modelId) {
 
   modelSelect.value = modelId;
   setupState = await invoke('set_selected_model', { model: modelId });
-  recordedWav = null;
-  hasTranscriptionResult = false;
   renderSetupState();
 }
 
+function currentSpeakerMode() {
+  return diarizationModeSelect.value || 'none';
+}
+
 async function ensureTwoSpeakerRequirements() {
-  if (diarizationModeSelect.value !== 'tdrz_2speaker') {
+  if (currentSpeakerMode() !== 'tdrz_2speaker') {
     return true;
   }
 
@@ -191,8 +211,8 @@ function getSelectedCoachnotesClient() {
 }
 
 function updateDestinationPreview() {
-  if (!saveMarkdownCheckbox.checked) {
-    destinationPreview.textContent = 'Markdown file output is disabled for this run.';
+  if (!saveMarkdownCheckbox.checked && !saveRawAudioCheckbox.checked) {
+    destinationPreview.textContent = 'File output is disabled for this run.';
     return;
   }
 
@@ -201,27 +221,38 @@ function updateDestinationPreview() {
   const hh = String(now.getHours()).padStart(2, '0');
   const mm = String(now.getMinutes()).padStart(2, '0');
   const ss = String(now.getSeconds()).padStart(2, '0');
+  const transcriptDir = String(transcriptDirInput.value || '').trim();
+  const rawAudioBase = `${date}-transcript-${hh}${mm}${ss}`;
+  const lines = [];
 
-  if (coachnotesEnabled()) {
+  if (saveMarkdownCheckbox.checked && coachnotesEnabled()) {
     const root = String(coachnotesRootDirInput.value || '').trim();
     const client = getSelectedCoachnotesClient();
     if (!root || !client) {
-      destinationPreview.textContent =
-        'CoachNotes mode: choose root folder and client to preview destination.';
-      return;
+      lines.push('CoachNotes mode: choose root folder and client to preview destination.');
+    } else {
+      lines.push(`Transcript: ${root}/${client}/${date}-transcript-${hh}${mm}${ss}.md`);
     }
-
-    destinationPreview.textContent = `Destination: ${root}/${client}/${date}-transcript-${hh}${mm}${ss}.md`;
-    return;
+  } else if (saveMarkdownCheckbox.checked) {
+    if (!transcriptDir) {
+      lines.push('Transcript: default transcript folder.');
+    } else {
+      lines.push(`Transcript: ${transcriptDir}/transcript-<timestamp>.md`);
+    }
   }
 
-  const transcriptDir = String(transcriptDirInput.value || '').trim();
-  if (!transcriptDir) {
-    destinationPreview.textContent = 'Destination: default transcript folder.';
-    return;
+  if (saveRawAudioCheckbox.checked) {
+    if (!transcriptDir) {
+      lines.push('Raw audio: default transcript folder.');
+    } else if (selectedCaptureMode() === 'both') {
+      lines.push(`Raw audio: ${transcriptDir}/${rawAudioBase}-recording.wav`);
+      lines.push(`Also saves: ${rawAudioBase}-coach-mic.wav and ${rawAudioBase}-client-system.wav`);
+    } else {
+      lines.push(`Raw audio: ${transcriptDir}/${rawAudioBase}-recording.wav`);
+    }
   }
 
-  destinationPreview.textContent = `Destination: ${transcriptDir}/transcript-<timestamp>.md`;
+  destinationPreview.textContent = lines.join('\n');
 }
 
 function populateCoachnotesClients(clients, selectedClient) {
@@ -286,7 +317,7 @@ function syncActionButtons() {
     modelDownloadInProgress ||
     isTranscribing ||
     isSavingCoachnotesSettings ||
-    !recordedWav ||
+    !hasRecordedAudio() ||
     !canTranscribe;
 
   transcribeBtn.textContent = hasTranscriptionResult ? 'Transcribe Again' : 'Transcribe';
@@ -364,6 +395,11 @@ function renderSetupState() {
 async function refreshSetupState() {
   setupState = await invoke('get_setup_state');
   modelSelect.value = setupState.selected_model;
+  renderSetupState();
+}
+
+async function saveDiarizationMode(mode) {
+  setupState = await invoke('set_diarization_mode', { mode });
   renderSetupState();
 }
 
@@ -542,6 +578,7 @@ function decodePcm16Wav(bytes) {
 
   let offset = 12;
   let format = null;
+  let resolvedFormat = null;
   let channels = 1;
   let sampleRateHz = 16000;
   let bitsPerSample = 16;
@@ -558,6 +595,15 @@ function decodePcm16Wav(bytes) {
       channels = view.getUint16(chunkStart + 2, true);
       sampleRateHz = view.getUint32(chunkStart + 4, true);
       bitsPerSample = view.getUint16(chunkStart + 14, true);
+
+      if (format === 0xfffe && chunkSize >= 40) {
+        const subFormat = view.getUint32(chunkStart + 24, true);
+        if (subFormat === 1 || subFormat === 3) {
+          resolvedFormat = subFormat;
+        }
+      } else {
+        resolvedFormat = format;
+      }
     } else if (chunkId === 'data' && chunkStart + chunkSize <= data.byteLength) {
       dataOffset = chunkStart;
       dataSize = chunkSize;
@@ -567,22 +613,34 @@ function decodePcm16Wav(bytes) {
     offset = chunkStart + chunkSize + (chunkSize % 2);
   }
 
-  if (format !== 1 || bitsPerSample !== 16 || dataOffset < 0 || channels <= 0) {
-    throw new Error('Unsupported WAV format. Expected PCM16.');
+  const effectiveFormat = resolvedFormat ?? format;
+  const isPcm16 = effectiveFormat === 1 && bitsPerSample === 16;
+  const isFloat32 = effectiveFormat === 3 && bitsPerSample === 32;
+
+  if ((!isPcm16 && !isFloat32) || dataOffset < 0 || channels <= 0) {
+    throw new Error(
+      `Unsupported WAV format. Expected PCM16/Float32, got format=${effectiveFormat ?? 'unknown'} bits=${bitsPerSample}.`
+    );
   }
 
-  const frameCount = Math.floor(dataSize / (2 * channels));
+  const bytesPerSample = bitsPerSample / 8;
+  const frameCount = Math.floor(dataSize / (bytesPerSample * channels));
   const samples = new Float32Array(frameCount);
 
   let cursor = dataOffset;
   for (let frame = 0; frame < frameCount; frame++) {
     let mixed = 0;
     for (let channel = 0; channel < channels; channel++) {
-      const sample = view.getInt16(cursor, true);
-      cursor += 2;
-      mixed += sample / 32768;
+      let sample = 0;
+      if (isPcm16) {
+        sample = view.getInt16(cursor, true) / 32768;
+      } else if (isFloat32) {
+        sample = view.getFloat32(cursor, true);
+      }
+      cursor += bytesPerSample;
+      mixed += Number.isFinite(sample) ? sample : 0;
     }
-    samples[frame] = mixed / channels;
+    samples[frame] = Math.max(-1, Math.min(1, mixed / channels));
   }
 
   return {
@@ -641,11 +699,101 @@ function mergeSystemAndMic(systemWav, micWav) {
   return encodeWav(mixed, targetRate);
 }
 
+function buildAlignmentSignal(samples, inputRate) {
+  const targetRate = 50;
+  const absolute = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i++) {
+    absolute[i] = Math.abs(samples[i]);
+  }
+
+  const resampled = resampleBuffer(absolute, inputRate, targetRate);
+  const smoothed = new Float32Array(resampled.length);
+  const windowRadius = 2;
+  for (let i = 0; i < resampled.length; i++) {
+    let total = 0;
+    let count = 0;
+    const start = Math.max(0, i - windowRadius);
+    const end = Math.min(resampled.length - 1, i + windowRadius);
+    for (let j = start; j <= end; j++) {
+      total += resampled[j];
+      count += 1;
+    }
+    smoothed[i] = count > 0 ? total / count : 0;
+  }
+
+  return { signal: smoothed, rate: targetRate };
+}
+
+function estimateSystemAlignmentOffsetMs(systemWav, micWav) {
+  if (!systemWav || !micWav) {
+    return null;
+  }
+
+  const systemDecoded = decodePcm16Wav(systemWav);
+  const micDecoded = decodePcm16Wav(micWav);
+  const { signal: rawSystemSignal, rate } = buildAlignmentSignal(systemDecoded.samples, systemDecoded.sampleRate);
+  const { signal: rawMicSignal } = buildAlignmentSignal(micDecoded.samples, micDecoded.sampleRate);
+
+  const maxSystemSamples = Math.min(rawSystemSignal.length, rate * 30);
+  const maxMicSamples = Math.min(rawMicSignal.length, rate * 120);
+  const systemSignal = rawSystemSignal.subarray(0, maxSystemSamples);
+  const micSignal = rawMicSignal.subarray(0, maxMicSamples);
+
+  if (systemSignal.length < rate * 2 || micSignal.length <= systemSignal.length) {
+    return null;
+  }
+
+  const micSquares = new Float64Array(micSignal.length + 1);
+  for (let i = 0; i < micSignal.length; i++) {
+    micSquares[i + 1] = micSquares[i] + (micSignal[i] * micSignal[i]);
+  }
+
+  let systemEnergy = 0;
+  for (let i = 0; i < systemSignal.length; i++) {
+    systemEnergy += systemSignal[i] * systemSignal[i];
+  }
+  if (systemEnergy <= 1e-9) {
+    return null;
+  }
+
+  let bestLagSamples = 0;
+  let bestScore = -Infinity;
+  const maxLag = micSignal.length - systemSignal.length;
+  for (let lag = 0; lag <= maxLag; lag++) {
+    let dot = 0;
+    for (let i = 0; i < systemSignal.length; i++) {
+      dot += micSignal[lag + i] * systemSignal[i];
+    }
+
+    const micEnergy = micSquares[lag + systemSignal.length] - micSquares[lag];
+    if (micEnergy <= 1e-9) {
+      continue;
+    }
+
+    const score = dot / Math.sqrt(systemEnergy * micEnergy);
+    if (score > bestScore) {
+      bestScore = score;
+      bestLagSamples = lag;
+    }
+  }
+
+  if (!Number.isFinite(bestScore) || bestScore < 0.2) {
+    return null;
+  }
+
+  return Math.round((bestLagSamples * 1000) / rate);
+}
+
+function shouldUseSourceAwareMicProcessing() {
+  return selectedCaptureMode() === 'both' && currentSpeakerMode() === 'source_aware_2speaker';
+}
+
 async function requestMicrophoneStream() {
+  const sourceAwareProcessing = shouldUseSourceAwareMicProcessing();
   return navigator.mediaDevices.getUserMedia({
     audio: {
-      echoCancellation: false,
-      noiseSuppression: false,
+      echoCancellation: sourceAwareProcessing,
+      noiseSuppression: sourceAwareProcessing,
       autoGainControl: false,
       channelCount: 1,
     },
@@ -708,10 +856,12 @@ async function startRecording() {
 
     audioChunks = [];
     totalSamples = 0;
-    recordedWav = null;
+    recordedCapture = null;
     hasTranscriptionResult = false;
     savedTranscriptPath = null;
+    savedAudioPaths = [];
 
+    recordingStartWallTimeMs = Date.now();
     isRecording = true;
     isStoppingRecording = false;
     openFileBtn.hidden = true;
@@ -756,6 +906,9 @@ async function stopRecording() {
   try {
     let micWav = null;
     let systemWav = null;
+    let primaryWav = null;
+    let stopWarnings = [];
+    let systemAudioOffsetMs = 0;
 
     if (microphoneCaptureActive) {
       await cleanupRecordingGraph();
@@ -774,38 +927,64 @@ async function stopRecording() {
     if (systemCaptureActive) {
       try {
         const rawBytes = await invoke('stop_system_audio_recording');
-        systemWav = normalizeWavTo16k(Uint8Array.from(rawBytes || []));
+        const audioData = Array.isArray(rawBytes?.audio_data)
+          ? rawBytes.audio_data
+          : rawBytes;
+        systemWav = normalizeWavTo16k(Uint8Array.from(audioData || []));
+        const firstAudioWallTimeMs = Number(rawBytes?.first_audio_wall_time_ms || 0);
+        if (firstAudioWallTimeMs > 0 && recordingStartWallTimeMs > 0) {
+          systemAudioOffsetMs = Math.max(0, firstAudioWallTimeMs - recordingStartWallTimeMs);
+        }
       } catch (error) {
         if (activeCaptureMode === 'system') {
           throw error;
         }
         const message = error instanceof Error ? error.message : String(error);
-        setStatus(`System audio warning: ${message}. Using microphone capture only.`, 'warning');
+        stopWarnings.push(`System audio capture failed: ${message}. Using microphone capture only.`);
       }
     }
     systemCaptureActive = false;
     microphoneCaptureActive = false;
 
     if (activeCaptureMode === 'system') {
-      recordedWav = systemWav;
+      primaryWav = systemWav;
     } else if (activeCaptureMode === 'both') {
       if (systemWav && micWav) {
-        recordedWav = mergeSystemAndMic(systemWav, micWav);
+        primaryWav = mergeSystemAndMic(systemWav, micWav);
       } else {
-        recordedWav = systemWav || micWav;
+        primaryWav = systemWav || micWav;
       }
     } else {
-      recordedWav = micWav;
+      primaryWav = micWav;
     }
 
-    if (!recordedWav || recordedWav.length <= 44) {
+    if (!primaryWav || primaryWav.length <= 44) {
+      recordedCapture = null;
       setStatus('No audio captured. Try again.', 'error');
       syncActionButtons();
       return;
     }
 
+    if (systemWav && micWav) {
+      const estimatedAlignmentOffsetMs = estimateSystemAlignmentOffsetMs(systemWav, micWav);
+      if (Number.isFinite(estimatedAlignmentOffsetMs)) {
+        systemAudioOffsetMs = estimatedAlignmentOffsetMs;
+      }
+    }
+
+    recordedCapture = {
+      captureMode: activeCaptureMode,
+      primaryWav,
+      microphoneWav: micWav,
+      systemWav,
+      systemAudioOffsetMs: Number.isFinite(systemAudioOffsetMs) ? systemAudioOffsetMs : 0,
+    };
     hasTranscriptionResult = false;
-    setStatus('Recording ready to transcribe', 'ready');
+    if (stopWarnings.length > 0) {
+      setStatus(`Recording ready to transcribe. ${stopWarnings.join(' ')}`, 'warning');
+    } else {
+      setStatus('Recording ready to transcribe', 'ready');
+    }
     syncActionButtons();
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -817,7 +996,8 @@ async function stopRecording() {
 }
 
 async function transcribeRecording() {
-  if (!recordedWav) return;
+  const primaryWav = currentPrimaryWav();
+  if (!primaryWav) return;
   if (!selectedModelReady()) {
     setStatus('Selected model is not downloaded.', 'error');
     return;
@@ -835,13 +1015,17 @@ async function transcribeRecording() {
   syncActionButtons();
 
   const options = {
-    audio_data: Array.from(recordedWav),
+    audio_data: Array.from(primaryWav),
+    microphone_audio_data: recordedCapture?.microphoneWav ? Array.from(recordedCapture.microphoneWav) : [],
+    system_audio_data: recordedCapture?.systemWav ? Array.from(recordedCapture.systemWav) : [],
+    system_audio_offset_ms: recordedCapture?.systemAudioOffsetMs || 0,
     model: modelSelect.value,
     language: languageSelect.value,
     save_markdown: saveMarkdownCheckbox.checked,
+    save_raw_audio: saveRawAudioCheckbox.checked,
     output_mode: getOutputMode(),
     client: getSelectedCoachnotesClient(),
-    diarization_mode: diarizationModeSelect.value,
+    diarization_mode: currentSpeakerMode(),
   };
 
   try {
@@ -850,21 +1034,42 @@ async function transcribeRecording() {
     renderWarnings(result.warnings || []);
     resultSection.hidden = false;
     savedTranscriptPath = result.saved_path || null;
+    savedAudioPaths = Array.isArray(result.saved_audio_paths)
+      ? result.saved_audio_paths.filter(Boolean)
+      : [];
 
-    if (savedTranscriptPath) {
+    if (savedTranscriptPath || savedAudioPaths.length > 0) {
       openFileBtn.hidden = false;
     } else {
       openFileBtn.hidden = true;
     }
 
-    if (result.diarization_applied) {
-      setStatus('Transcription complete (2-speaker mode)', 'ready');
+    if (result.speaker_mode_used === 'source_aware_2speaker') {
+      setStatus(
+        savedAudioPaths.length > 0
+          ? 'Transcription complete (source-aware 2-speaker, raw audio saved)'
+          : 'Transcription complete (source-aware 2-speaker)',
+        'ready'
+      );
+    } else if (result.diarization_applied) {
+      setStatus(
+        savedAudioPaths.length > 0
+          ? 'Transcription complete (2-speaker mode, raw audio saved)'
+          : 'Transcription complete (2-speaker mode)',
+        'ready'
+      );
     } else {
-      setStatus('Transcription complete', 'ready');
+      setStatus(
+        savedAudioPaths.length > 0
+          ? 'Transcription complete (raw audio saved)'
+          : 'Transcription complete',
+        'ready'
+      );
     }
     hasTranscriptionResult = true;
   } catch (error) {
     renderWarnings([]);
+    savedAudioPaths = [];
     setStatus(`Transcription failed: ${String(error)}`, 'error');
   } finally {
     isTranscribing = false;
@@ -875,12 +1080,10 @@ async function transcribeRecording() {
 modelSelect.addEventListener('change', async () => {
   try {
     setupState = await invoke('set_selected_model', { model: modelSelect.value });
-    recordedWav = null;
-    hasTranscriptionResult = false;
     renderSetupState();
 
     if (diarizationModeSelect.value === 'tdrz_2speaker' && modelSelect.value !== DIARIZATION_MODEL_ID) {
-      diarizationModeSelect.value = 'none';
+      await saveDiarizationMode('none');
       setStatus('2-speaker mode disabled. It requires the small.en-tdrz model.', 'warning');
     }
   } catch (error) {
@@ -979,6 +1182,11 @@ saveMarkdownCheckbox.addEventListener('change', () => {
   syncActionButtons();
 });
 
+saveRawAudioCheckbox.addEventListener('change', () => {
+  updateDestinationPreview();
+  syncActionButtons();
+});
+
 languageSelect.addEventListener('change', async () => {
   if (diarizationModeSelect.value === 'tdrz_2speaker') {
     await ensureTwoSpeakerRequirements();
@@ -987,11 +1195,35 @@ languageSelect.addEventListener('change', async () => {
 
 captureModeSelect.addEventListener('change', () => {
   updateCaptureModeHelp();
+  updateDestinationPreview();
 });
 
 diarizationModeSelect.addEventListener('change', async () => {
-  if (diarizationModeSelect.value === 'tdrz_2speaker') {
-    await ensureTwoSpeakerRequirements();
+  const nextMode = diarizationModeSelect.value;
+
+  if (nextMode === 'tdrz_2speaker') {
+    const enabled = await ensureTwoSpeakerRequirements();
+    if (!enabled) {
+      await saveDiarizationMode('none');
+      return;
+    }
+  }
+
+  try {
+    await saveDiarizationMode(nextMode);
+  } catch (error) {
+    setStatus(`Failed to update speaker mode: ${String(error)}`, 'error');
+    return;
+  }
+
+  if (nextMode === 'source_aware_2speaker') {
+    setStatus('Source-aware 2-speaker mode selected. Use System audio + microphone.', 'idle');
+  } else if (nextMode === 'tdrz_2speaker') {
+    if (selectedModelReady()) {
+      setStatus('2-speaker mode is active (small.en-tdrz + English).', 'idle');
+    } else {
+      setStatus('2-speaker mode selected. Download small.en-tdrz to continue.', 'warning');
+    }
   } else {
     setStatus('Standard transcription mode selected.', 'idle');
   }
@@ -1002,9 +1234,10 @@ stopBtn.addEventListener('click', stopRecording);
 transcribeBtn.addEventListener('click', transcribeRecording);
 
 openFileBtn.addEventListener('click', async () => {
-  if (!savedTranscriptPath) return;
+  const pathToShow = savedTranscriptPath || savedAudioPaths[0];
+  if (!pathToShow) return;
   try {
-    await invoke('show_in_folder', { path: savedTranscriptPath });
+    await invoke('show_in_folder', { path: pathToShow });
   } catch (error) {
     setStatus(`Could not open saved file: ${String(error)}`, 'error');
   }
@@ -1030,6 +1263,7 @@ listen('model-download-progress', (event) => {
 async function boot() {
   resetTimer();
   updateCaptureModeHelp();
+  savedAudioPaths = [];
   hasTranscriptionResult = false;
   setStatus('Ready to record', 'idle');
 

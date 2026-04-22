@@ -5,6 +5,10 @@ import Darwin
 import Foundation
 import ScreenCaptureKit
 
+struct CaptureResult: Encodable {
+    let firstAudioWallTimeMs: Int64
+}
+
 enum CaptureError: LocalizedError {
     case invalidArguments
     case missingOutputPath
@@ -74,6 +78,7 @@ final class StreamAudioWriter: NSObject, SCStreamOutput, SCStreamDelegate {
     private var started = false
     private(set) var hasAudio = false
     private(set) var streamError: Error?
+    private(set) var firstAudioWallTimeMs: Int64?
 
     init(outputURL: URL) throws {
         if FileManager.default.fileExists(atPath: outputURL.path) {
@@ -121,6 +126,7 @@ final class StreamAudioWriter: NSObject, SCStreamOutput, SCStreamDelegate {
                 streamError = writer.error ?? NSError(domain: "system-audio-capture", code: 1)
                 return
             }
+            firstAudioWallTimeMs = Int64((Date().timeIntervalSince1970 * 1000.0).rounded())
             writer.startSession(atSourceTime: timestamp)
             started = true
         }
@@ -180,7 +186,7 @@ final class SystemAudioRecorder {
         writer = try StreamAudioWriter(outputURL: outputURL)
     }
 
-    func runUntilStdinClosed() async throws {
+    func runUntilStdinClosed() async throws -> CaptureResult {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
         guard let display = content.displays.first else {
             throw CaptureError.noDisplayAvailable
@@ -214,6 +220,8 @@ final class SystemAudioRecorder {
 
         try await stream.stopCapture()
         try await writer.finish()
+
+        return CaptureResult(firstAudioWallTimeMs: writer.firstAudioWallTimeMs ?? 0)
     }
 
     private func startStdinWatcher() {
@@ -242,7 +250,9 @@ struct SystemAudioCaptureMain {
             try ensureScreenRecordingPermission()
 
             let recorder = try SystemAudioRecorder(outputPath: cli.outputPath)
-            try await recorder.runUntilStdinClosed()
+            let result = try await recorder.runUntilStdinClosed()
+            let data = try JSONEncoder().encode(result)
+            FileHandle.standardOutput.write(data)
             exit(0)
         } catch {
             let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

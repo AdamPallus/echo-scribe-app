@@ -120,13 +120,19 @@
           <label for="diarization-mode-select">Speaker mode</label>
           <select id="diarization-mode-select">
             <option value="none" selected>Standard transcription</option>
-            <option value="tdrz_2speaker">Experimental 2-speaker (English only)</option>
+            <option value="source_aware_2speaker">Two-speaker from system + microphone (recommended)</option>
+            <option value="tdrz_2speaker">Whisper diarization fallback (experimental, English only)</option>
           </select>
         </div>
 
         <label class="checkbox-row">
           <input id="save-markdown" type="checkbox" checked />
           Save transcript as Markdown (.md)
+        </label>
+
+        <label class="checkbox-row">
+          <input id="save-raw-audio" type="checkbox" />
+          Save raw audio copies (.wav) to the standard transcript folder
         </label>
       </section>
 
