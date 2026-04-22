@@ -14,8 +14,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 const COACHNOTES_DELETED_DIR: &str = "Deleted Notes";
 const SPEAKER_TURN_MARKER: &str = "[SPEAKER_TURN]";
-const SYSTEM_AUDIO_CAPTURE_PLACEHOLDER_MARKER: &str =
-    "system-audio-capture sidecar placeholder";
+const SYSTEM_AUDIO_CAPTURE_PLACEHOLDER_MARKER: &str = "system-audio-capture sidecar placeholder";
 const BLANK_AUDIO_MARKER: &str = "[BLANK_AUDIO]";
 
 #[derive(Debug, Clone, Copy)]
@@ -876,7 +875,12 @@ fn parse_srt_timestamp(raw: &str) -> Option<u64> {
         0 => 0,
         1 => sec_parts[1].parse::<u64>().ok()? * 100,
         2 => sec_parts[1].parse::<u64>().ok()? * 10,
-        _ => sec_parts[1].chars().take(3).collect::<String>().parse::<u64>().ok()?,
+        _ => sec_parts[1]
+            .chars()
+            .take(3)
+            .collect::<String>()
+            .parse::<u64>()
+            .ok()?,
     };
 
     Some((((hours * 60) + minutes) * 60 + seconds) * 1000 + millis)
@@ -920,13 +924,13 @@ fn parse_srt_segments(text: &str, speaker: &str) -> Vec<TimestampedSegment> {
 
         let body = sanitize_transcript_text(
             &lines
-            .iter()
-            .skip(time_index + 1)
-            .copied()
-            .collect::<Vec<&str>>()
-            .join(" ")
-            .trim()
-            .to_string(),
+                .iter()
+                .skip(time_index + 1)
+                .copied()
+                .collect::<Vec<&str>>()
+                .join(" ")
+                .trim()
+                .to_string(),
         );
 
         if body.is_empty() {
@@ -1318,12 +1322,13 @@ fn yaml_quote(value: &str) -> String {
 
 fn normalize_transcript(text: &str) -> String {
     sanitize_transcript_text(
-        &text.lines()
-        .map(str::trim)
-        .collect::<Vec<&str>>()
-        .join("\n")
-        .trim()
-        .to_string(),
+        &text
+            .lines()
+            .map(str::trim)
+            .collect::<Vec<&str>>()
+            .join("\n")
+            .trim()
+            .to_string(),
     )
 }
 
@@ -1827,10 +1832,7 @@ async fn stop_system_audio_recording(
             }
         } else {
             serde_json::from_slice::<SystemAudioCaptureMetadata>(&stdout).map_err(|error| {
-                format!(
-                    "System audio capture returned invalid metadata: {}",
-                    error
-                )
+                format!("System audio capture returned invalid metadata: {}", error)
             })?
         };
 
@@ -1949,8 +1951,7 @@ async fn transcribe_recording(
         }
         if system_segments.is_empty() {
             warnings.push(
-                "System audio channel did not produce timestamped transcript segments."
-                    .to_string(),
+                "System audio channel did not produce timestamped transcript segments.".to_string(),
             );
         }
 
