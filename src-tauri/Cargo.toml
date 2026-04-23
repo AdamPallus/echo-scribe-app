@@ -1,6 +1,6 @@
 [package]
 name = "echo-scribe"
-version = "0.2.0"
+version = "0.3.0"
 description = "Local-first audio recorder and transcriber using whisper.cpp models"
 authors = ["Adam Pallus"]
 edition = "2021"
