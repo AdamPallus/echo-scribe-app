@@ -63,17 +63,17 @@
       </symbol>
     </svg>
 
-    <main class="app">
-      <header class="topbar" data-tauri-drag-region>
+    <header class="titlebar" data-tauri-drag-region>
+      <div class="titlebar-inner" data-tauri-drag-region>
         <div class="brand" data-tauri-drag-region>
-          <span class="brand-mark" aria-hidden="true">
+          <span class="brand-mark" aria-hidden="true" data-tauri-drag-region>
             <svg><use href="#icon-sparkle"></use></svg>
           </span>
-          <span class="brand-name">EchoScribe</span>
-          <span class="brand-meta">for CoachNotes</span>
+          <span class="brand-name" data-tauri-drag-region>EchoScribe</span>
+          <span class="brand-meta" data-tauri-drag-region>for CoachNotes</span>
         </div>
-        <div class="topbar-actions">
-          <span id="setup-pill" class="pill warning">Setup required</span>
+        <div class="titlebar-actions" data-tauri-drag-region>
+          <span id="setup-pill" class="pill warning" data-tauri-drag-region>Setup required</span>
           <button
             id="open-settings-btn"
             type="button"
@@ -84,7 +84,10 @@
             <svg><use href="#icon-gear"></use></svg>
           </button>
         </div>
-      </header>
+      </div>
+    </header>
+
+    <main class="app">
 
       <section class="stage">
         <div class="stage-status">
