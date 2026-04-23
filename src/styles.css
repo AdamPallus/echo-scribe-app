@@ -1,3 +1,27 @@
+@font-face {
+  font-family: 'Fraunces';
+  src: url('./assets/fonts/fraunces-variable.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('./assets/fonts/inter-variable.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('./assets/fonts/jetbrains-mono-variable.ttf') format('truetype');
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+}
+
 :root {
   /* Warm paper palette — oat milk, cream, espresso, terracotta, moss. */
   --bg: #efe7d7;
@@ -134,9 +158,6 @@ h2 {
   width: 100%;
   /* Transparent so the stage's paper texture shows through. */
   background: transparent;
-  /* CSS fallback for Electron; Tauri uses data-tauri-drag-region. */
-  -webkit-app-region: drag;
-  app-region: drag;
 }
 
 .titlebar-inner {
@@ -155,12 +176,6 @@ h2 {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.titlebar button,
-.icon-btn {
-  -webkit-app-region: no-drag;
-  app-region: no-drag;
 }
 
 .brand {

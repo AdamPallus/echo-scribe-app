@@ -1,6 +1,7 @@
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { open } = window.__TAURI__.dialog;
+const appWindow = window.__TAURI__.window?.getCurrentWindow?.() || null;
 
 const modelSelect = document.getElementById('model-select');
 const languageSelect = document.getElementById('language-select');
@@ -54,6 +55,7 @@ const resultSection = document.getElementById('result-section');
 const warningsList = document.getElementById('warnings-list');
 const transcriptOutput = document.getElementById('transcript-output');
 const openFileBtn = document.getElementById('open-file-btn');
+const titlebar = document.getElementById('app-titlebar');
 
 let setupState = null;
 let modelDownloadInProgress = false;
@@ -1482,6 +1484,20 @@ openFileBtn.addEventListener('click', async () => {
     setStatus(`Could not open saved file: ${String(error)}`, 'error');
   }
 });
+
+if (titlebar && appWindow && typeof appWindow.startDragging === 'function') {
+  titlebar.addEventListener('mousedown', (event) => {
+    if (event.button !== 0) {
+      return;
+    }
+
+    if (event.target.closest('button, input, select, textarea, a, [data-no-drag]')) {
+      return;
+    }
+
+    void appWindow.startDragging().catch(() => {});
+  });
+}
 
 listen('progress', (event) => {
   const { percent, message } = event.payload;
