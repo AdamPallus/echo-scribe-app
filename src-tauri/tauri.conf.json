@@ -11,8 +11,10 @@
     "windows": [
       {
         "title": "Echo Scribe",
-        "width": 860,
-        "height": 920,
+        "width": 1320,
+        "height": 860,
+        "minWidth": 980,
+        "minHeight": 760,
         "resizable": true,
         "dragDropEnabled": false
       }

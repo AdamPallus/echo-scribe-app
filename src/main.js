@@ -8,6 +8,7 @@ const diarizationModeSelect = document.getElementById('diarization-mode-select')
 const saveMarkdownCheckbox = document.getElementById('save-markdown');
 const saveRawAudioCheckbox = document.getElementById('save-raw-audio');
 const setupDetails = document.getElementById('setup-details');
+const captureOptionButtons = Array.from(document.querySelectorAll('[data-capture-option]'));
 
 const setupPill = document.getElementById('setup-pill');
 const setupMessage = document.getElementById('setup-message');
@@ -27,10 +28,23 @@ const coachnotesClientSelect = document.getElementById('coachnotes-client-select
 const destinationPreview = document.getElementById('destination-preview');
 const captureModeSelect = document.getElementById('capture-mode-select');
 const captureModeHelp = document.getElementById('capture-mode-help');
+const micMeterText = document.getElementById('mic-meter-text');
+const micLevelFill = document.getElementById('mic-level-fill');
+const systemMeterState = document.getElementById('system-meter-state');
+const systemMeterText = document.getElementById('system-meter-text');
+const overviewSource = document.getElementById('overview-source');
+const overviewDuration = document.getElementById('overview-duration');
+const overviewRecorded = document.getElementById('overview-recorded');
+const overviewOutput = document.getElementById('overview-output');
 
+const discardBtn = document.getElementById('discard-btn');
+const discardBtnTitle = document.getElementById('discard-btn-title');
 const startBtn = document.getElementById('start-btn');
-const stopBtn = document.getElementById('stop-btn');
+const recordToggleTitle = document.getElementById('record-toggle-title');
+const recordToggleIcon = document.getElementById('record-toggle-icon');
 const transcribeBtn = document.getElementById('transcribe-btn');
+const transcribeBtnTitle = document.getElementById('transcribe-btn-title');
+const statusDot = document.querySelector('.status-dot');
 const statusEl = document.getElementById('recording-status');
 const timerEl = document.getElementById('recording-timer');
 const progressSection = document.getElementById('progress-section');
@@ -67,6 +81,8 @@ let savedTranscriptPath = null;
 let savedAudioPaths = [];
 let hasTranscriptionResult = false;
 let recordingStartWallTimeMs = 0;
+let lastRecordingAt = null;
+const METER_FLOOR = 0;
 
 function hasRecordedAudio() {
   return Boolean(
@@ -86,10 +102,15 @@ function currentPrimaryWav() {
 function setStatus(message, state = 'idle') {
   statusEl.textContent = message;
   statusEl.className = `status ${state}`;
+  if (statusDot) {
+    statusDot.className = `status-dot ${state}`;
+  }
+  refreshDashboardState();
 }
 
 function resetTimer() {
   timerEl.textContent = '00:00';
+  updateOverview();
 }
 
 function startTimer() {
@@ -100,6 +121,7 @@ function startTimer() {
     const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
     const seconds = String(totalSeconds % 60).padStart(2, '0');
     timerEl.textContent = `${minutes}:${seconds}`;
+    updateOverview();
   }, 200);
 }
 
@@ -140,8 +162,166 @@ function selectedCaptureMode() {
   return captureModeSelect.value || 'microphone';
 }
 
+function captureModeUsesMicrophone(mode) {
+  return mode !== 'system';
+}
+
 function captureModeNeedsSystemAudio(mode) {
   return mode === 'system' || mode === 'both';
+}
+
+function describeCaptureMode(mode) {
+  if (mode === 'system') return 'System Audio';
+  if (mode === 'both') return 'System + Microphone';
+  return 'Microphone';
+}
+
+function describeSpeakerMode(mode) {
+  if (mode === 'source_aware_2speaker') return 'Source-aware';
+  if (mode === 'tdrz_2speaker') return 'Whisper diarization';
+  return 'Standard';
+}
+
+function basename(path) {
+  if (!path) return '';
+  const normalized = String(path).replace(/\\/g, '/');
+  const parts = normalized.split('/');
+  return parts[parts.length - 1] || normalized;
+}
+
+function formatRecordedAt(value) {
+  if (!value) return 'Not recorded yet';
+
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(value);
+  } catch {
+    return value.toLocaleString();
+  }
+}
+
+function setMicLevel(level) {
+  const percent = Math.max(METER_FLOOR, Math.min(1, level));
+  micLevelFill.style.width = `${Math.round(percent * 100)}%`;
+}
+
+function resetMicMeter() {
+  setMicLevel(0);
+}
+
+function syncCaptureOptionButtons() {
+  const selected = selectedCaptureMode();
+  for (const button of captureOptionButtons) {
+    button.classList.toggle('is-selected', button.dataset.captureOption === selected);
+  }
+}
+
+function measureAudioLevel(samples) {
+  if (!samples || samples.length === 0) {
+    return 0;
+  }
+
+  let squared = 0;
+  let peak = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const value = Math.abs(samples[i]);
+    squared += value * value;
+    if (value > peak) {
+      peak = value;
+    }
+  }
+
+  const rms = Math.sqrt(squared / samples.length);
+  return Math.min(1, Math.max(rms * 4.8, peak * 0.72));
+}
+
+function currentOverviewOutput() {
+  if (savedTranscriptPath) {
+    return basename(savedTranscriptPath);
+  }
+
+  if (savedAudioPaths.length > 0) {
+    return basename(savedAudioPaths[0]);
+  }
+
+  if (hasRecordedAudio()) {
+    if (!saveMarkdownCheckbox.checked && !saveRawAudioCheckbox.checked) {
+      return 'No file output enabled';
+    }
+
+    if (saveMarkdownCheckbox.checked && saveRawAudioCheckbox.checked) {
+      return coachnotesEnabled() ? 'Ready for CoachNotes + WAV export' : 'Ready for transcript + WAV export';
+    }
+
+    if (saveMarkdownCheckbox.checked) {
+      return coachnotesEnabled() ? 'Ready for CoachNotes export' : 'Ready for markdown export';
+    }
+
+    return 'Ready for WAV export';
+  }
+
+  return 'Nothing saved yet';
+}
+
+function updateCaptureIndicators() {
+  const mode = selectedCaptureMode();
+  const micEnabled = captureModeUsesMicrophone(mode);
+  const systemEnabled = captureModeNeedsSystemAudio(mode);
+
+  if (isRecording && microphoneCaptureActive) {
+    micMeterText.textContent = 'Live';
+  } else if (micEnabled) {
+    micMeterText.textContent = 'Armed';
+    resetMicMeter();
+  } else {
+    micMeterText.textContent = 'Off';
+    resetMicMeter();
+  }
+
+  systemMeterState.className = 'system-pill';
+
+  if (isRecording && systemCaptureActive) {
+    systemMeterState.textContent = 'Live';
+    systemMeterState.classList.add('is-live');
+    systemMeterText.textContent =
+      'Native system capture is recording in parallel with the current session.';
+    return;
+  }
+
+  if (systemEnabled) {
+    systemMeterState.textContent = 'Armed';
+    systemMeterState.classList.add('is-armed');
+    if (mode === 'both') {
+      systemMeterText.textContent =
+        'System audio is armed for source-aware capture when recording starts.';
+    } else {
+      systemMeterText.textContent =
+        'System audio will be captured directly from macOS for this session.';
+    }
+    return;
+  }
+
+  systemMeterState.textContent = 'Off';
+  systemMeterState.classList.add('is-off');
+  systemMeterText.textContent =
+    'System audio capture is not selected for this session.';
+}
+
+function updateOverview() {
+  overviewSource.textContent = `${describeCaptureMode(selectedCaptureMode())} • ${describeSpeakerMode(currentSpeakerMode())}`;
+  overviewDuration.textContent = timerEl.textContent;
+  overviewRecorded.textContent = formatRecordedAt(lastRecordingAt);
+  overviewOutput.textContent = currentOverviewOutput();
+}
+
+function refreshDashboardState() {
+  syncCaptureOptionButtons();
+  updateCaptureIndicators();
+  updateOverview();
 }
 
 function updateCaptureModeHelp() {
@@ -155,6 +335,8 @@ function updateCaptureModeHelp() {
   } else {
     captureModeHelp.textContent = 'Records local microphone input from this Mac.';
   }
+
+  refreshDashboardState();
 }
 
 async function applyModelSelection(modelId) {
@@ -213,6 +395,7 @@ function getSelectedCoachnotesClient() {
 function updateDestinationPreview() {
   if (!saveMarkdownCheckbox.checked && !saveRawAudioCheckbox.checked) {
     destinationPreview.textContent = 'File output is disabled for this run.';
+    refreshDashboardState();
     return;
   }
 
@@ -253,6 +436,7 @@ function updateDestinationPreview() {
   }
 
   destinationPreview.textContent = lines.join('\n');
+  refreshDashboardState();
 }
 
 function populateCoachnotesClients(clients, selectedClient) {
@@ -301,16 +485,27 @@ function syncActionButtons() {
   const canTranscribe = setupReady && modelReady;
   captureModeSelect.disabled =
     modelDownloadInProgress || isTranscribing || isRecording || isSavingCoachnotesSettings;
+  for (const button of captureOptionButtons) {
+    button.disabled =
+      modelDownloadInProgress || isTranscribing || isRecording || isSavingCoachnotesSettings;
+  }
+  discardBtn.disabled = isRecording || isStoppingRecording || (!hasRecordedAudio() && !hasTranscriptionResult);
 
   if (isRecording) {
-    startBtn.disabled = true;
-    stopBtn.disabled = false;
+    startBtn.disabled = isStoppingRecording;
+    startBtn.classList.add('is-recording');
+    recordToggleTitle.textContent = 'Stop Recording';
+    recordToggleIcon.setAttribute('href', '#icon-stop');
     transcribeBtn.disabled = true;
-    transcribeBtn.textContent = 'Transcribe';
+    transcribeBtnTitle.textContent = 'Transcribe';
+    discardBtnTitle.textContent = 'Discard';
+    refreshDashboardState();
     return;
   }
 
-  stopBtn.disabled = true;
+  startBtn.classList.remove('is-recording');
+  recordToggleTitle.textContent = 'Start Recording';
+  recordToggleIcon.setAttribute('href', '#icon-record');
   startBtn.disabled =
     modelDownloadInProgress || isTranscribing || isSavingCoachnotesSettings || !canTranscribe;
   transcribeBtn.disabled =
@@ -320,7 +515,9 @@ function syncActionButtons() {
     !hasRecordedAudio() ||
     !canTranscribe;
 
-  transcribeBtn.textContent = hasTranscriptionResult ? 'Transcribe Again' : 'Transcribe';
+  transcribeBtnTitle.textContent = hasTranscriptionResult ? 'Transcribe Again' : 'Transcribe';
+  discardBtnTitle.textContent = 'Discard';
+  refreshDashboardState();
 }
 
 function renderSetupState() {
@@ -848,6 +1045,7 @@ async function startRecording() {
         copy.set(input);
         audioChunks.push(copy);
         totalSamples += copy.length;
+        setMicLevel(measureAudioLevel(input));
       };
 
       processorNode.connect(silentGain);
@@ -860,8 +1058,10 @@ async function startRecording() {
     hasTranscriptionResult = false;
     savedTranscriptPath = null;
     savedAudioPaths = [];
+    resetMicMeter();
 
     recordingStartWallTimeMs = Date.now();
+    lastRecordingAt = new Date(recordingStartWallTimeMs);
     isRecording = true;
     isStoppingRecording = false;
     openFileBtn.hidden = true;
@@ -1077,6 +1277,27 @@ async function transcribeRecording() {
   }
 }
 
+function discardCurrentSession() {
+  if (isRecording || isStoppingRecording) {
+    return;
+  }
+
+  recordedCapture = null;
+  savedTranscriptPath = null;
+  savedAudioPaths = [];
+  hasTranscriptionResult = false;
+  lastRecordingAt = null;
+  transcriptOutput.textContent = '';
+  renderWarnings([]);
+  progressSection.hidden = true;
+  resultSection.hidden = true;
+  openFileBtn.hidden = true;
+  resetTimer();
+  resetMicMeter();
+  setStatus('Ready to record', 'idle');
+  syncActionButtons();
+}
+
 modelSelect.addEventListener('change', async () => {
   try {
     setupState = await invoke('set_selected_model', { model: modelSelect.value });
@@ -1198,6 +1419,18 @@ captureModeSelect.addEventListener('change', () => {
   updateDestinationPreview();
 });
 
+for (const button of captureOptionButtons) {
+  button.addEventListener('click', () => {
+    const nextMode = button.dataset.captureOption;
+    if (!nextMode || nextMode === captureModeSelect.value) {
+      return;
+    }
+
+    captureModeSelect.value = nextMode;
+    captureModeSelect.dispatchEvent(new Event('change'));
+  });
+}
+
 diarizationModeSelect.addEventListener('change', async () => {
   const nextMode = diarizationModeSelect.value;
 
@@ -1229,9 +1462,16 @@ diarizationModeSelect.addEventListener('change', async () => {
   }
 });
 
-startBtn.addEventListener('click', startRecording);
-stopBtn.addEventListener('click', stopRecording);
+startBtn.addEventListener('click', () => {
+  if (isRecording) {
+    void stopRecording();
+    return;
+  }
+
+  void startRecording();
+});
 transcribeBtn.addEventListener('click', transcribeRecording);
+discardBtn.addEventListener('click', discardCurrentSession);
 
 openFileBtn.addEventListener('click', async () => {
   const pathToShow = savedTranscriptPath || savedAudioPaths[0];
@@ -1262,6 +1502,7 @@ listen('model-download-progress', (event) => {
 
 async function boot() {
   resetTimer();
+  resetMicMeter();
   updateCaptureModeHelp();
   savedAudioPaths = [];
   hasTranscriptionResult = false;
