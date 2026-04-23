@@ -3,6 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
     <link rel="stylesheet" href="styles.css" />
     <title>Echo Scribe</title>
     <script type="module" src="/main.js" defer></script>
@@ -25,7 +31,6 @@
       </symbol>
       <symbol id="icon-file" viewBox="0 0 24 24">
         <path d="M7.5 3A2.5 2.5 0 0 0 5 5.5v13A2.5 2.5 0 0 0 7.5 21h9A2.5 2.5 0 0 0 19 18.5V8.56a2.5 2.5 0 0 0-.73-1.77l-2.06-2.06A2.5 2.5 0 0 0 14.44 4H7.5Zm7 .75c.2 0 .39.08.53.22l2 2c.14.14.22.33.22.53V8h-2.75A1.75 1.75 0 0 1 12.75 6.25V3.75h1.75Zm-3.25 0v2.5A3.25 3.25 0 0 0 14.5 9.5H17.5v9a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1v-13a1 1 0 0 1 1-1h3.75Z" fill="currentColor"/>
-        <path d="M11.25 11a.75.75 0 0 1 .75.75v1.5h1.5a.75.75 0 0 1 0 1.5H12v1.5a.75.75 0 0 1-1.5 0v-1.5H9a.75.75 0 0 1 0-1.5h1.5v-1.5a.75.75 0 0 1 .75-.75Z" fill="currentColor"/>
       </symbol>
       <symbol id="icon-clock" viewBox="0 0 24 24">
         <path d="M12 3.25A8.75 8.75 0 1 0 20.75 12 8.76 8.76 0 0 0 12 3.25Zm0 16A7.25 7.25 0 1 1 19.25 12 7.26 7.26 0 0 1 12 19.25Z" fill="currentColor"/>
@@ -43,305 +48,457 @@
       <symbol id="icon-stop" viewBox="0 0 24 24">
         <rect x="7" y="7" width="10" height="10" rx="2.2" fill="currentColor"/>
       </symbol>
+      <symbol id="icon-gear" viewBox="0 0 24 24">
+        <path d="M12 8.5a3.5 3.5 0 1 0 3.5 3.5A3.5 3.5 0 0 0 12 8.5Zm0 5.5a2 2 0 1 1 2-2 2 2 0 0 1-2 2Z" fill="currentColor"/>
+        <path d="M19.14 12.94a7.48 7.48 0 0 0 0-1.88l2-1.55a.5.5 0 0 0 .12-.63l-1.9-3.29a.5.5 0 0 0-.6-.22l-2.36.95a7.44 7.44 0 0 0-1.63-.95l-.36-2.5a.5.5 0 0 0-.5-.42h-3.8a.5.5 0 0 0-.5.42l-.36 2.5a7.57 7.57 0 0 0-1.63.95l-2.36-.95a.5.5 0 0 0-.6.22l-1.9 3.29a.5.5 0 0 0 .12.63l2 1.55a7.48 7.48 0 0 0 0 1.88l-2 1.55a.5.5 0 0 0-.12.63l1.9 3.29a.5.5 0 0 0 .6.22l2.36-.95a7.44 7.44 0 0 0 1.63.95l.36 2.5a.5.5 0 0 0 .5.42h3.8a.5.5 0 0 0 .5-.42l.36-2.5a7.57 7.57 0 0 0 1.63-.95l2.36.95a.5.5 0 0 0 .6-.22l1.9-3.29a.5.5 0 0 0-.12-.63ZM12 17a5 5 0 1 1 5-5 5 5 0 0 1-5 5Z" fill="currentColor"/>
+      </symbol>
+      <symbol id="icon-close" viewBox="0 0 24 24">
+        <path d="M18.3 5.71a1 1 0 0 0-1.41 0L12 10.59 7.11 5.7A1 1 0 1 0 5.7 7.11L10.59 12 5.7 16.89a1 1 0 1 0 1.41 1.41L12 13.41l4.89 4.89a1 1 0 0 0 1.41-1.41L13.41 12l4.89-4.89a1 1 0 0 0 0-1.4Z" fill="currentColor"/>
+      </symbol>
+      <symbol id="icon-wave" viewBox="0 0 24 24">
+        <path d="M3 12h1.5v-2H3Zm3-4h1.5v6H6Zm3-3h1.5v12H9Zm3 2h1.5v8H12Zm3-4h1.5v16H15Zm3 3h1.5v10H18Zm3 3H22.5v4H21Z" fill="currentColor"/>
+      </symbol>
+      <symbol id="icon-sparkle" viewBox="0 0 24 24">
+        <path d="M12 2.5c.3 0 .56.2.64.5l1.2 4.3a3 3 0 0 0 2.08 2.08l4.3 1.2a.67.67 0 0 1 0 1.28l-4.3 1.2a3 3 0 0 0-2.08 2.08l-1.2 4.3a.67.67 0 0 1-1.28 0l-1.2-4.3a3 3 0 0 0-2.08-2.08l-4.3-1.2a.67.67 0 0 1 0-1.28l4.3-1.2A3 3 0 0 0 10.16 7.3l1.2-4.3c.08-.3.34-.5.64-.5Z" fill="currentColor"/>
+      </symbol>
     </svg>
 
-    <main class="app-shell">
-      <div class="studio-shell">
-        <aside class="settings-panel panel-card">
-          <div class="panel-header">
-            <div>
-              <h1>Settings</h1>
-            </div>
-            <span id="setup-pill" class="pill warning">Setup required</span>
+    <main class="app">
+      <header class="topbar" data-tauri-drag-region>
+        <div class="brand" data-tauri-drag-region>
+          <span class="brand-mark" aria-hidden="true">
+            <svg><use href="#icon-sparkle"></use></svg>
+          </span>
+          <span class="brand-name">EchoScribe</span>
+          <span class="brand-meta">for CoachNotes</span>
+        </div>
+        <div class="topbar-actions">
+          <span id="setup-pill" class="pill warning">Setup required</span>
+          <button
+            id="open-settings-btn"
+            type="button"
+            class="icon-btn"
+            aria-label="Open settings"
+            aria-controls="settings-drawer"
+          >
+            <svg><use href="#icon-gear"></use></svg>
+          </button>
+        </div>
+      </header>
+
+      <section class="stage">
+        <div class="stage-status">
+          <span class="status-dot idle" aria-hidden="true"></span>
+          <p id="recording-status" class="status idle">Ready to record</p>
+        </div>
+
+        <div class="timer-wrap">
+          <p id="recording-timer" class="timer">00:00</p>
+          <span class="timer-caption">mm:ss</span>
+        </div>
+
+        <div class="record-wrap">
+          <button id="start-btn" type="button" class="record-button" aria-label="Start recording">
+            <span class="record-breath" aria-hidden="true"></span>
+            <span class="record-face">
+              <svg class="record-icon"><use id="record-toggle-icon" href="#icon-record"></use></svg>
+            </span>
+          </button>
+          <p id="record-toggle-title" class="record-label">Start Recording</p>
+          <p class="record-hint">
+            Press <kbd>Space</kbd> to toggle
+          </p>
+        </div>
+
+        <div class="chips" role="group" aria-label="Quick settings">
+          <button type="button" class="chip" data-chip-target="capture">
+            <svg class="chip-icon"><use id="chip-capture-icon" href="#icon-mix"></use></svg>
+            <span id="chip-capture">System + Microphone</span>
+          </button>
+          <button type="button" class="chip" data-chip-target="speakers">
+            <span id="chip-speakers">Standard transcription</span>
+          </button>
+          <button type="button" class="chip" data-chip-target="language">
+            <span id="chip-language">English</span>
+          </button>
+          <button type="button" class="chip chip-accent" data-chip-target="coach" id="chip-coach" hidden>
+            <svg class="chip-icon"><use href="#icon-file"></use></svg>
+            <span>CoachNotes · <span id="chip-client">Select client</span></span>
+          </button>
+        </div>
+
+        <div class="meter-strip" aria-hidden="true">
+          <span id="mic-meter-text" class="meter-strip-label">Standby</span>
+          <div class="level-track">
+            <div id="mic-level-fill" class="level-fill"></div>
           </div>
+        </div>
+      </section>
 
-          <div class="settings-body">
-            <section class="settings-section">
-              <label class="field-label" for="capture-mode-select">Capture Source</label>
-              <div class="capture-options" role="group" aria-label="Capture Source">
-                <button type="button" class="capture-option" data-capture-option="both">
-                  <span class="capture-option-leading">
-                    <span class="capture-icon-wrap">
-                      <svg class="capture-icon"><use href="#icon-mix"></use></svg>
-                    </span>
-                    <span class="capture-copy">
-                      <span class="capture-option-title">System + Microphone</span>
-                    </span>
-                  </span>
-                  <span class="capture-indicator" aria-hidden="true"></span>
-                </button>
-                <button type="button" class="capture-option" data-capture-option="system">
-                  <span class="capture-option-leading">
-                    <span class="capture-icon-wrap">
-                      <svg class="capture-icon"><use href="#icon-system"></use></svg>
-                    </span>
-                    <span class="capture-copy">
-                      <span class="capture-option-title">System Audio</span>
-                    </span>
-                  </span>
-                  <span class="capture-indicator" aria-hidden="true"></span>
-                </button>
-                <button type="button" class="capture-option" data-capture-option="microphone">
-                  <span class="capture-option-leading">
-                    <span class="capture-icon-wrap">
-                      <svg class="capture-icon"><use href="#icon-mic"></use></svg>
-                    </span>
-                    <span class="capture-copy">
-                      <span class="capture-option-title">Microphone</span>
-                    </span>
-                  </span>
-                  <span class="capture-indicator" aria-hidden="true"></span>
-                </button>
-              </div>
-              <select id="capture-mode-select" class="visually-hidden" aria-hidden="true" tabindex="-1">
-                <option value="microphone">Microphone only</option>
-                <option value="system">System audio only (video call / speakers)</option>
-                <option value="both" selected>System audio + microphone</option>
-              </select>
-              <p id="capture-mode-help" class="small-text field-help">
-                Captures system audio and microphone together (native system capture + mic mix).
-              </p>
-            </section>
-
-            <section class="settings-section">
-              <div class="option-group">
-                <label for="model-select" class="field-label">Model</label>
-                <select id="model-select">
-                  <option value="tiny">Tiny (fastest)</option>
-                  <option value="base" selected>Base (recommended on Air)</option>
-                  <option value="small">Small (higher quality)</option>
-                  <option value="medium">Medium (best quality, slower)</option>
-                  <option value="small.en-tdrz">Small.en-tdrz (experimental 2-speaker)</option>
-                </select>
-              </div>
-
-              <div class="option-group">
-                <label for="language-select" class="field-label">Language</label>
-                <select id="language-select">
-                  <option value="auto">Auto-detect</option>
-                  <option value="en" selected>English</option>
-                  <option value="es">Spanish</option>
-                  <option value="fr">French</option>
-                  <option value="de">German</option>
-                  <option value="ja">Japanese</option>
-                  <option value="ko">Korean</option>
-                  <option value="zh">Chinese</option>
-                </select>
-              </div>
-
-              <div class="option-group">
-                <label for="diarization-mode-select" class="field-label">Speaker Mode</label>
-                <select id="diarization-mode-select">
-                  <option value="none" selected>Standard transcription</option>
-                  <option value="source_aware_2speaker">Two-speaker from system + microphone (recommended)</option>
-                  <option value="tdrz_2speaker">Whisper diarization fallback (experimental, English only)</option>
-                </select>
-              </div>
-            </section>
-
-            <section class="settings-section toggle-section">
-              <label class="toggle-row">
-                <span class="toggle-copy">
-                  <span class="toggle-title">Save raw audio</span>
-                  <span class="toggle-hint">Store a local copy of the recording.</span>
-                </span>
-                <span class="switch-shell">
-                  <input id="save-raw-audio" type="checkbox" />
-                  <span class="switch-ui"></span>
-                </span>
-              </label>
-
-              <label class="toggle-row">
-                <span class="toggle-copy">
-                  <span class="toggle-title">CoachNotes Mode</span>
-                  <span class="toggle-hint">Send transcripts into a selected client folder.</span>
-                </span>
-                <span class="switch-shell">
-                  <input id="coachnotes-enabled" type="checkbox" />
-                  <span class="switch-ui"></span>
-                </span>
-              </label>
-            </section>
-
-            <details id="setup-details" class="settings-details">
-              <summary>
-                <span>
-                  <span class="details-title">Storage, Models, and CoachNotes</span>
-                  <span class="details-subtitle">Folders, downloads, and transcript export settings.</span>
-                </span>
-              </summary>
-
-              <div class="details-content">
-                <p id="setup-message" class="small-text"></p>
-                <p id="sidecar-status" class="small-text"></p>
-
-                <label class="toggle-row compact-toggle-row">
-                  <span class="toggle-copy">
-                    <span class="toggle-title">Save transcript markdown</span>
-                    <span class="toggle-hint">Write a `.md` transcript after each transcription run.</span>
-                  </span>
-                  <span class="switch-shell">
-                    <input id="save-markdown" type="checkbox" checked />
-                    <span class="switch-ui"></span>
-                  </span>
-                </label>
-
-                <div class="download-row">
-                  <button id="download-model-btn" class="btn btn-accent">Download Selected Model</button>
-                  <p id="model-status-text" class="small-text"></p>
-                </div>
-
-                <div id="model-progress-wrap" class="model-progress-wrap" hidden>
-                  <div class="progress-bar slim-progress-bar">
-                    <div id="model-progress-fill" class="progress-fill"></div>
-                  </div>
-                  <p id="model-progress-text" class="progress-text">Starting download...</p>
-                </div>
-
-                <div class="option-group">
-                  <label for="transcript-dir" class="field-label">Standard Transcript Save Folder</label>
-                  <div class="directory-row">
-                    <input id="transcript-dir" type="text" readonly />
-                    <button id="choose-dir-btn" class="btn btn-secondary">Choose Folder</button>
-                  </div>
-                </div>
-
-                <div class="option-group">
-                  <label for="coachnotes-root-dir" class="field-label">CoachNotes Root Folder</label>
-                  <div class="directory-row">
-                    <input id="coachnotes-root-dir" type="text" readonly />
-                    <button id="choose-coachnotes-dir-btn" class="btn btn-secondary">Choose Folder</button>
-                  </div>
-                </div>
-
-                <div class="option-group">
-                  <label for="coachnotes-client-select" class="field-label">CoachNotes Client</label>
-                  <select id="coachnotes-client-select"></select>
-                </div>
-
-                <p id="destination-preview" class="destination-preview"></p>
-              </div>
-            </details>
+      <section id="post-card" class="post-card" hidden>
+        <div class="post-actions">
+          <button id="transcribe-btn" class="btn btn-primary" disabled>
+            <svg class="btn-icon"><use href="#icon-file"></use></svg>
+            <span id="transcribe-btn-title">Transcribe</span>
+            <kbd class="btn-kbd">↵</kbd>
+          </button>
+          <button id="discard-btn" class="btn btn-ghost" disabled>
+            <svg class="btn-icon"><use href="#icon-trash"></use></svg>
+            <span id="discard-btn-title">Discard</span>
+          </button>
+        </div>
+        <dl class="detail-list">
+          <div class="detail-row">
+            <dt><svg class="detail-icon"><use href="#icon-mix"></use></svg>Source</dt>
+            <dd id="overview-source">System + Microphone</dd>
           </div>
-        </aside>
-
-        <section class="main-panel panel-card">
-          <div class="main-panel-inner">
-            <div class="session-header">
-              <div class="session-heading">
-                <div class="session-title-row">
-                  <span class="status-dot idle" aria-hidden="true"></span>
-                  <h2 class="session-title">Recording</h2>
-                </div>
-                <p id="recording-status" class="status idle">Ready to record</p>
-              </div>
-              <div class="timer-wrap">
-                <p id="recording-timer" class="timer">00:00</p>
-                <span class="timer-caption">mm:ss</span>
-              </div>
-            </div>
-
-            <section class="meter-card surface-card">
-              <div class="meter-header">
-                <span class="meter-label">Input level</span>
-                <span id="mic-meter-text" class="meter-value">Standby</span>
-              </div>
-              <div class="level-track" aria-hidden="true">
-                <div class="level-track-grid"></div>
-                <div id="mic-level-fill" class="level-fill"></div>
-              </div>
-            </section>
-
-            <section class="overview-card surface-card">
-              <div class="surface-header">
-                <h2>Recording overview</h2>
-              </div>
-              <div class="overview-table">
-                <div class="overview-row">
-                  <span class="overview-label"><svg class="overview-icon"><use href="#icon-mix"></use></svg>Source</span>
-                  <span id="overview-source" class="overview-value">System + Microphone</span>
-                </div>
-                <div class="overview-row">
-                  <span class="overview-label"><svg class="overview-icon"><use href="#icon-clock"></use></svg>Duration</span>
-                  <span id="overview-duration" class="overview-value">00:00</span>
-                </div>
-                <div class="overview-row">
-                  <span class="overview-label"><svg class="overview-icon"><use href="#icon-calendar"></use></svg>Recorded</span>
-                  <span id="overview-recorded" class="overview-value">Not recorded yet</span>
-                </div>
-                <div class="overview-row">
-                  <span class="overview-label"><svg class="overview-icon"><use href="#icon-file"></use></svg>Audio file</span>
-                  <span id="overview-output" class="overview-value">Nothing saved yet</span>
-                </div>
-              </div>
-            </section>
-
-            <section class="action-card surface-card">
-              <div class="action-grid">
-                <button id="discard-btn" class="action-button action-button-secondary" disabled>
-                  <span class="action-glyph action-glyph-secondary">
-                    <svg class="action-icon"><use href="#icon-trash"></use></svg>
-                  </span>
-                  <span id="discard-btn-title" class="action-title">Discard</span>
-                  <span class="action-shortcut">Clear</span>
-                </button>
-
-                <div class="record-action-wrap">
-                  <button id="start-btn" class="action-button action-button-primary">
-                    <span class="record-shell">
-                      <span class="record-ring"></span>
-                      <span class="record-core">
-                        <svg class="record-icon"><use id="record-toggle-icon" href="#icon-record"></use></svg>
-                      </span>
-                    </span>
-                    <span id="record-toggle-title" class="action-title">Start Recording</span>
-                    <span class="action-shortcut">Space</span>
-                  </button>
-                </div>
-
-                <button id="transcribe-btn" class="action-button action-button-accent" disabled>
-                  <span class="action-glyph action-glyph-accent">
-                    <svg class="action-icon"><use href="#icon-file"></use></svg>
-                  </span>
-                  <span id="transcribe-btn-title" class="action-title">Transcribe</span>
-                  <span class="action-shortcut">Return</span>
-                </button>
-              </div>
-            </section>
-
-            <section id="progress-section" class="surface-card progress-card" hidden>
-              <div class="surface-header">
-                <h2>Transcription progress</h2>
-              </div>
-              <div class="progress-bar">
-                <div class="progress-fill" id="progress-fill"></div>
-              </div>
-              <p id="progress-text" class="progress-text">Initializing...</p>
-            </section>
-
-            <section id="result-section" class="surface-card result-card" hidden>
-              <div class="result-header">
-                <div class="surface-header surface-header-inline">
-                  <h2>Transcript</h2>
-                </div>
-                <button id="open-file-btn" class="btn btn-secondary" hidden>Show Saved File</button>
-              </div>
-              <ul id="warnings-list" class="warnings-list" hidden></ul>
-              <pre id="transcript-output" class="transcript-output"></pre>
-            </section>
-
-            <div class="session-footer">
-              <span class="session-footer-icon">
-                <svg class="footer-icon"><use href="#icon-shield"></use></svg>
-              </span>
-              <div class="session-footer-copy">
-                <span id="system-meter-state" class="system-pill">Standby</span>
-                <p id="system-meter-text" class="small-text">Audio is saved locally to your Mac.</p>
-              </div>
-            </div>
+          <div class="detail-row">
+            <dt><svg class="detail-icon"><use href="#icon-clock"></use></svg>Duration</dt>
+            <dd id="overview-duration">00:00</dd>
           </div>
-        </section>
-      </div>
+          <div class="detail-row">
+            <dt><svg class="detail-icon"><use href="#icon-calendar"></use></svg>Recorded</dt>
+            <dd id="overview-recorded">Not recorded yet</dd>
+          </div>
+          <div class="detail-row">
+            <dt><svg class="detail-icon"><use href="#icon-file"></use></svg>File</dt>
+            <dd id="overview-output">Nothing saved yet</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section id="progress-section" class="progress-card" hidden>
+        <div class="progress-head">
+          <h2>Transcribing</h2>
+          <p id="progress-text" class="progress-text">Initializing…</p>
+        </div>
+        <div class="progress-bar">
+          <div id="progress-fill" class="progress-fill"></div>
+        </div>
+      </section>
+
+      <section id="result-section" class="result-card" hidden>
+        <header class="result-header">
+          <div>
+            <span class="eyebrow">Finished</span>
+            <h2>Transcript</h2>
+          </div>
+          <button id="open-file-btn" class="btn btn-ghost btn-sm" hidden>Show saved file</button>
+        </header>
+        <ul id="warnings-list" class="warnings-list" hidden></ul>
+        <pre id="transcript-output" class="transcript-output"></pre>
+      </section>
+
+      <footer class="app-footer">
+        <span class="footer-icon"><svg><use href="#icon-shield"></use></svg></span>
+        <span id="system-meter-state" class="system-pill">Standby</span>
+        <p id="system-meter-text" class="footer-text">Audio is saved locally to your Mac.</p>
+      </footer>
     </main>
+
+    <aside
+      id="settings-drawer"
+      class="drawer"
+      aria-hidden="true"
+      aria-labelledby="drawer-title"
+    >
+      <div class="drawer-backdrop" data-drawer-close></div>
+      <div class="drawer-panel" role="dialog" aria-modal="true">
+        <header class="drawer-header">
+          <div>
+            <span class="eyebrow">Preferences</span>
+            <h1 id="drawer-title">Settings</h1>
+          </div>
+          <button type="button" class="icon-btn" data-drawer-close aria-label="Close settings">
+            <svg><use href="#icon-close"></use></svg>
+          </button>
+        </header>
+
+        <div class="drawer-body">
+          <section class="settings-section" data-section="capture">
+            <h2 class="section-title">Capture source</h2>
+            <div class="capture-options" role="group" aria-label="Capture Source">
+              <button type="button" class="capture-option" data-capture-option="both">
+                <span class="capture-option-leading">
+                  <span class="capture-icon-wrap">
+                    <svg class="capture-icon"><use href="#icon-mix"></use></svg>
+                  </span>
+                  <span class="capture-copy">
+                    <span class="capture-option-title">System + Microphone</span>
+                    <span class="capture-option-hint">Captures both the call and your mic.</span>
+                  </span>
+                </span>
+                <span class="capture-indicator" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="capture-option" data-capture-option="system">
+                <span class="capture-option-leading">
+                  <span class="capture-icon-wrap">
+                    <svg class="capture-icon"><use href="#icon-system"></use></svg>
+                  </span>
+                  <span class="capture-copy">
+                    <span class="capture-option-title">System audio</span>
+                    <span class="capture-option-hint">Call/video audio only.</span>
+                  </span>
+                </span>
+                <span class="capture-indicator" aria-hidden="true"></span>
+              </button>
+              <button type="button" class="capture-option" data-capture-option="microphone">
+                <span class="capture-option-leading">
+                  <span class="capture-icon-wrap">
+                    <svg class="capture-icon"><use href="#icon-mic"></use></svg>
+                  </span>
+                  <span class="capture-copy">
+                    <span class="capture-option-title">Microphone</span>
+                    <span class="capture-option-hint">Local mic only.</span>
+                  </span>
+                </span>
+                <span class="capture-indicator" aria-hidden="true"></span>
+              </button>
+            </div>
+            <select id="capture-mode-select" class="visually-hidden" aria-hidden="true" tabindex="-1">
+              <option value="microphone">Microphone only</option>
+              <option value="system">System audio only (video call / speakers)</option>
+              <option value="both" selected>System audio + microphone</option>
+            </select>
+            <p id="capture-mode-help" class="field-help">
+              Captures system audio and microphone together (native system capture + mic mix).
+            </p>
+          </section>
+
+          <section class="settings-section" data-section="speakers">
+            <h2 class="section-title">Speaker handling</h2>
+            <div class="option-group">
+              <label for="diarization-mode-select" class="field-label">Speaker mode</label>
+              <select id="diarization-mode-select">
+                <option value="none" selected>Standard transcription</option>
+                <option value="source_aware_2speaker">Two-speaker from system + microphone (recommended)</option>
+                <option value="tdrz_2speaker">Whisper diarization fallback (experimental, English only)</option>
+              </select>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="language">
+            <h2 class="section-title">Model &amp; language</h2>
+            <div class="option-group">
+              <label for="model-select" class="field-label">Whisper model</label>
+              <select id="model-select">
+                <option value="tiny">Tiny (fastest)</option>
+                <option value="base" selected>Base (recommended on Air)</option>
+                <option value="small">Small (higher quality)</option>
+                <option value="medium">Medium (best quality, slower)</option>
+                <option value="small.en-tdrz">Small.en-tdrz (experimental 2-speaker)</option>
+              </select>
+            </div>
+
+            <div class="option-group">
+              <label for="language-select" class="field-label">Language</label>
+              <select id="language-select">
+                <option value="auto">Auto-detect</option>
+                <option value="en" selected>English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="zh">Chinese</option>
+              </select>
+            </div>
+
+            <div class="download-row">
+              <button id="download-model-btn" class="btn btn-primary btn-sm">Download selected model</button>
+              <p id="model-status-text" class="field-help"></p>
+            </div>
+            <div id="model-progress-wrap" class="model-progress-wrap" hidden>
+              <div class="progress-bar slim-progress-bar">
+                <div id="model-progress-fill" class="progress-fill"></div>
+              </div>
+              <p id="model-progress-text" class="progress-text">Starting download…</p>
+            </div>
+          </section>
+
+          <section class="settings-section" data-section="storage">
+            <h2 class="section-title">Storage</h2>
+
+            <label class="toggle-row">
+              <span class="toggle-copy">
+                <span class="toggle-title">Save raw audio</span>
+                <span class="toggle-hint">Keep a local copy of every recording.</span>
+              </span>
+              <span class="switch-shell">
+                <input id="save-raw-audio" type="checkbox" />
+                <span class="switch-ui"></span>
+              </span>
+            </label>
+
+            <label class="toggle-row">
+              <span class="toggle-copy">
+                <span class="toggle-title">Save transcript markdown</span>
+                <span class="toggle-hint">Write a <code>.md</code> file after each run.</span>
+              </span>
+              <span class="switch-shell">
+                <input id="save-markdown" type="checkbox" checked />
+                <span class="switch-ui"></span>
+              </span>
+            </label>
+
+            <div class="option-group">
+              <label for="transcript-dir" class="field-label">Standard transcript folder</label>
+              <div class="directory-row">
+                <input id="transcript-dir" type="text" readonly />
+                <button id="choose-dir-btn" class="btn btn-ghost btn-sm">Choose…</button>
+              </div>
+            </div>
+
+            <p id="sidecar-status" class="field-help"></p>
+            <p id="setup-message" class="field-help"></p>
+          </section>
+
+          <section class="settings-section" data-section="coach">
+            <h2 class="section-title">CoachNotes integration</h2>
+
+            <label class="toggle-row">
+              <span class="toggle-copy">
+                <span class="toggle-title">CoachNotes mode</span>
+                <span class="toggle-hint">Route transcripts into a client's folder with metadata.</span>
+              </span>
+              <span class="switch-shell">
+                <input id="coachnotes-enabled" type="checkbox" />
+                <span class="switch-ui"></span>
+              </span>
+            </label>
+
+            <div class="option-group">
+              <label for="coachnotes-root-dir" class="field-label">CoachNotes root folder</label>
+              <div class="directory-row">
+                <input id="coachnotes-root-dir" type="text" readonly />
+                <button id="choose-coachnotes-dir-btn" class="btn btn-ghost btn-sm">Choose…</button>
+              </div>
+            </div>
+
+            <div class="option-group">
+              <label for="coachnotes-client-select" class="field-label">Client</label>
+              <select id="coachnotes-client-select"></select>
+            </div>
+
+            <p id="destination-preview" class="destination-preview"></p>
+          </section>
+        </div>
+      </div>
+    </aside>
+
+    <script>
+      (function () {
+        const drawer = document.getElementById('settings-drawer');
+        const openBtn = document.getElementById('open-settings-btn');
+        const closers = drawer.querySelectorAll('[data-drawer-close]');
+        const body = document.body;
+
+        function openDrawer(sectionKey) {
+          drawer.classList.add('is-open');
+          drawer.setAttribute('aria-hidden', 'false');
+          body.classList.add('drawer-open');
+          if (sectionKey) {
+            const target = drawer.querySelector(
+              '[data-section="' + sectionKey + '"]'
+            );
+            if (target) {
+              requestAnimationFrame(() => {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                target.classList.add('is-highlighted');
+                setTimeout(() => target.classList.remove('is-highlighted'), 1400);
+              });
+            }
+          }
+        }
+
+        function closeDrawer() {
+          drawer.classList.remove('is-open');
+          drawer.setAttribute('aria-hidden', 'true');
+          body.classList.remove('drawer-open');
+        }
+
+        openBtn.addEventListener('click', () => openDrawer());
+        closers.forEach((el) => el.addEventListener('click', closeDrawer));
+        document.addEventListener('keydown', (e) => {
+          if (e.key === 'Escape' && drawer.classList.contains('is-open')) {
+            closeDrawer();
+          }
+        });
+
+        document.querySelectorAll('[data-chip-target]').forEach((chip) => {
+          chip.addEventListener('click', () => {
+            openDrawer(chip.dataset.chipTarget);
+          });
+        });
+
+        // Mirror select values into the summary chips on the stage.
+        const captureLabels = {
+          both: 'System + Microphone',
+          system: 'System audio',
+          microphone: 'Microphone',
+        };
+        const captureIcons = {
+          both: '#icon-mix',
+          system: '#icon-system',
+          microphone: '#icon-mic',
+        };
+        const speakerLabels = {
+          none: 'Standard transcription',
+          source_aware_2speaker: 'Two-speaker (source-aware)',
+          tdrz_2speaker: 'Two-speaker (experimental)',
+        };
+        const languageLabels = {
+          auto: 'Auto-detect',
+          en: 'English',
+          es: 'Spanish',
+          fr: 'French',
+          de: 'German',
+          ja: 'Japanese',
+          ko: 'Korean',
+          zh: 'Chinese',
+        };
+
+        const captureSelect = document.getElementById('capture-mode-select');
+        const speakerSelect = document.getElementById('diarization-mode-select');
+        const langSelect = document.getElementById('language-select');
+        const coachToggle = document.getElementById('coachnotes-enabled');
+        const clientSelect = document.getElementById('coachnotes-client-select');
+
+        const chipCapture = document.getElementById('chip-capture');
+        const chipCaptureIcon = document.getElementById('chip-capture-icon');
+        const chipSpeakers = document.getElementById('chip-speakers');
+        const chipLanguage = document.getElementById('chip-language');
+        const chipCoach = document.getElementById('chip-coach');
+        const chipClient = document.getElementById('chip-client');
+
+        function syncChips() {
+          const cap = captureSelect.value || 'both';
+          chipCapture.textContent = captureLabels[cap] || 'Capture';
+          if (chipCaptureIcon) {
+            chipCaptureIcon.setAttribute('href', captureIcons[cap] || '#icon-mix');
+          }
+          chipSpeakers.textContent = speakerLabels[speakerSelect.value] || 'Speakers';
+          chipLanguage.textContent = languageLabels[langSelect.value] || 'Language';
+
+          if (coachToggle.checked) {
+            chipCoach.hidden = false;
+            const clientVal = clientSelect.value;
+            const clientText = clientVal ? clientVal : 'Select client';
+            chipClient.textContent = clientText;
+          } else {
+            chipCoach.hidden = true;
+          }
+        }
+
+        [captureSelect, speakerSelect, langSelect, clientSelect].forEach((el) => {
+          el.addEventListener('change', syncChips);
+        });
+        coachToggle.addEventListener('change', syncChips);
+        // Re-sync after main.js boot populates things.
+        setTimeout(syncChips, 0);
+        setTimeout(syncChips, 400);
+        setTimeout(syncChips, 1500);
+      })();
+    </script>
   </body>
 </html>
